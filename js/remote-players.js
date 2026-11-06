@@ -62,8 +62,8 @@ function nameTag(name, color) {
   ctx.fillStyle=color;ctx.beginPath();ctx.arc(left+16,29,5,0,Math.PI*2);ctx.fill();
   ctx.fillStyle='#f7f6ef';ctx.fillText(name,left+29,29,width-37);
   const texture=new THREE.CanvasTexture(canvas);texture.colorSpace=THREE.SRGBColorSpace;texture.generateMipmaps=false;texture.minFilter=THREE.LinearFilter;
-  const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:texture,depthTest:true,depthWrite:false,transparent:true}));
-  sprite.name='Remote name';sprite.renderOrder=3;
+  const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:texture,depthTest:false,depthWrite:false,transparent:true}));
+  sprite.name='Remote name';sprite.renderOrder=999;
   return sprite;
 }
 

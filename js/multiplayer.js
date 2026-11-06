@@ -1,3 +1,4 @@
+import { createRoomRendezvous } from './room-rendezvous.js';
 import { createPlayroomSession } from './playroom-session.js';
 import { createRemotePlayers } from './remote-players.js';
 import { createSharedTraffic } from './shared-traffic.js';
@@ -6,13 +7,16 @@ const TIME_IDS = new Set(['golden','midday','twilight','midnight']);
 const $ = id => document.getElementById(id);
 const round = value => Math.round((Number.isFinite(value) ? value : 0)*100)/100;
 
-function playerSnapshot(controllers, name, day) {
+function playerSnapshot(controllers, name, day, camera) {
   const e=controllers.getActiveEntity(), person=controllers.entities.person, web=person.web;
   const airborne=web.state==='air', onFoot=e.type==='person';
   const pose=!onFoot ? 'idle' : web.anchor ? (web.swingTime<.14?'webshoot':'swing') :
     airborne ? (e.verticalVel>0?'jump':'fall') : Math.abs(e.speed)>4?'run':Math.abs(e.speed)>.25?'walk':'idle';
   const pivot=e.leanPivot || e.chassisPivot || e.tiltPivot;
-  return {name,mode:e.type,x:round(e.position.x),y:round(e.position.y),z:round(e.position.z),heading:round(e.heading),
+  camera.updateWorldMatrix(true, false);
+  const matrix = camera.matrixWorld.elements;
+  const viewYaw = Math.atan2(-matrix[8], -matrix[10]);
+  return {name,viewYaw:round(viewYaw),mode:e.type,x:round(e.position.x),y:round(e.position.y),z:round(e.position.z),heading:round(e.heading),
     pitch:round(pivot?.rotation.x),roll:round(pivot?.rotation.z),speed:round(e.speed),phase:round(e.pedalPhase),
     pose,side:web.side,suited:controllers.spiderSuited,suitProgress:round(person.avatar.suitProgress),
     web:onFoot&&web.anchor ? [round(web.anchor.x),round(web.anchor.y),round(web.anchor.z)] : null,day};
@@ -24,10 +28,13 @@ function playerName(id) {
   return '玩家 '+String(hash%1000).padStart(3,'0');
 }
 
-export function createMultiplayer({scene,controllerManager,trafficSystem,highwayTraffic,airTraffic,hijack,getDay,changeDay}) {
+export function createMultiplayer({scene,controllerManager,trafficSystem,highwayTraffic,airTraffic,hijack,getDay,changeDay,selectMode,onRendezvous}) {
   const peers=createRemotePlayers({scene,controllerManager,streetCars:trafficSystem.cars});
   const shared=createSharedTraffic({controllerManager,trafficSystem,highwayTraffic,airTraffic});
-  const names=new Map();
+  const names=new Map(), positions=new Map();
+  const rendezvous=createRoomRendezvous({controllerManager,selectMode,onArrival:onRendezvous});
+  let dismissCreateOnGuest=false, retryMeetAt=0;
+
   const button=$('room-button'), panel=$('room-panel'), nickname=$('room-nickname'), codeInput=$('room-code-input');
   const statusLine=$('room-status'), timeButtons=[...document.querySelectorAll('[data-time]')];
   let meetHost=false, lastWorld=0, lastPose=0, lastFlags='', started=false, name='';
@@ -43,8 +50,19 @@ export function createMultiplayer({scene,controllerManager,trafficSystem,highway
     for(const id of [s.playerId,...names.keys()]) {
       if(!id)continue;
       const row=document.createElement('li');
-      row.textContent=(id===s.playerId?(name||playerName(id)):names.get(id)||playerName(id))+
-        (id===s.playerId?' · 你':'')+(id===s.hostId?' · 房主':'');
+      const member=document.createElement('span');
+      const display=id===s.playerId?(name||playerName(id)):(names.get(id)||playerName(id));
+      member.textContent=display+(id===s.playerId?' · 你':'')+(id===s.hostId?' · 房主':'');
+      row.append(member);
+      if(id!==s.playerId){
+        const visit=document.createElement('button');
+        visit.type='button';
+        visit.disabled=!positions.has(id);
+        visit.textContent=visit.disabled?'等待位置':'前往队友';
+        visit.setAttribute('aria-label',visit.disabled?'正在等待 '+display+' 的位置':'前往队友 '+display);
+        visit.addEventListener('click',()=>visitPlayer(id));
+        row.append(visit);
+      }
       rows.push(row);
     }
     $('room-players').replaceChildren(...rows);
@@ -65,7 +83,7 @@ export function createMultiplayer({scene,controllerManager,trafficSystem,highway
       statusLine.textContent=s.isHost?'你是房主，可切换房间时段。':'房间时段跟随房主。';
       renderRoster(s);
     } else {
-      names.clear(); peers.clear(); lastFlags='';
+      names.clear(); positions.clear(); peers.clear(); lastFlags='';
       if(s.state==='error' && ['not-found','bad-code','removed'].includes(s.error)) writeURL('');
       for(const entity of Object.values(controllerManager.entities)){
         entity.mesh.visible=entity.type==='person' ? controllerManager.activeMode==='person'
@@ -75,24 +93,43 @@ export function createMultiplayer({scene,controllerManager,trafficSystem,highway
       statusLine.textContent=busy?'正在连接 Playroom…':s.state==='error'?(messages[s.error]||s.message):'每个房间最多 10 人。';
     }
   }
-  function nearbyHost(s) {
-    if(![s.x,s.y,s.z,s.heading].every(Number.isFinite)) return;
-    const dx=Math.cos(s.heading)*4, dz=-Math.sin(s.heading)*4;
-    controllerManager.teleportActiveTo(s.x+dx,s.z+dz,s.heading);
-    meetHost=false;
+  function visitPlayer(id) {
+    const target=positions.get(id);
+    if(!target)return false;
+    const others=[...positions.entries()].filter(([peerId])=>peerId!==id).map(([,pose])=>pose);
+    if(!rendezvous.meet(target,others,session.status.playerId)){
+      statusLine.textContent='队友周围暂无安全的会合点，请稍后再试。';
+      return false;
+    }
+    statusLine.textContent='已到达 '+(names.get(id)||playerName(id))+' 附近。';
+    if(panel.open)panel.close();
+    return true;
+  }
+  function tryMeetingHost() {
+    if(!meetHost || performance.now()<retryMeetAt)return;
+    const host=session.status.hostId;
+    if(!host || session.status.isHost || !positions.has(host))return;
+    retryMeetAt=performance.now()+1500;
+    if(visitPlayer(host))meetHost=false;
   }
   const session=createPlayroomSession({
     gameId:document.querySelector('meta[name="playroom-game-id"]')?.content || '',
     onPeerJoin(id){names.set(id,'');},
-    onPeerLeave(id){hijack.remove(id);names.delete(id);peers.remove(id);},
+    onPeerLeave(id){hijack.remove(id);names.delete(id);positions.delete(id);peers.remove(id);},
     onStatus,
     onSharedState(id,s) {
       hijack.receive(id,s);
       if(!peers.receive(id,{...s,street:hijack.approvedSlot(id,s.street)})) return;
+      const first=!positions.has(id);
+      positions.set(id,s);
       const display=typeof s.name==='string'?s.name.slice(0,18):'';
-      if(names.get(id)!==display){names.set(id,display);renderRoster(session.status);}
+      if(first || names.get(id)!==display){names.set(id,display);renderRoster(session.status);}
+      if(first && session.status.isHost && dismissCreateOnGuest){
+        dismissCreateOnGuest=false;
+        if(panel.open)panel.close();
+      }
       if(id===session.status.hostId && !session.status.isHost) {
-        if(meetHost) nearbyHost(s);
+        tryMeetingHost();
         if(TIME_IDS.has(s.day) && getDay()!==s.day) changeDay(s.day);
       }
     },
@@ -105,12 +142,12 @@ export function createMultiplayer({scene,controllerManager,trafficSystem,highway
   $('room-close').addEventListener('click',()=>panel.close());
   panel.addEventListener('keydown',e=>e.stopPropagation());
   panel.addEventListener('keyup',e=>e.stopPropagation());
-  panel.addEventListener('close',()=>controllerManager.resetInput());
+  panel.addEventListener('close',()=>{controllerManager.resetInput();dismissCreateOnGuest=false;});
   async function connect(code) {
     if(session.status.state==='connecting'||session.status.state==='online')return;
     name=nickname.value.trim().slice(0,18);
     try {localStorage.setItem('nyc-room-name',name);} catch {}
-    meetHost=Boolean(code); lastWorld=lastPose=0; lastFlags='';
+    meetHost=Boolean(code); retryMeetAt=0; dismissCreateOnGuest=!code&&panel.open; lastWorld=lastPose=0; lastFlags='';
     try {
       if(code) await session.join(code); else await session.create();
     } catch(err) {if(session.status.state!=='error')statusLine.textContent=err.message;openPanel();}
@@ -135,7 +172,7 @@ export function createMultiplayer({scene,controllerManager,trafficSystem,highway
     if(code){codeInput.value=code.toUpperCase();connect(code);}
   }
   function before(dt,elapsed) {
-    session.update();shared.update(dt);
+    session.update();tryMeetingHost();shared.update(dt);
     return shared.getClock(elapsed);
   }
   function after(dt,camera,now) {
@@ -144,7 +181,7 @@ export function createMultiplayer({scene,controllerManager,trafficSystem,highway
     for(const e of Object.values(controllerManager.entities)) e.mesh.visible=e.type===controllerManager.activeMode;
     const flags=controllerManager.activeMode+'/'+controllerManager.spiderSuited+'/'+Boolean(controllerManager.entities.person.web.anchor)+'/'+getDay()+'/'+hijack.revision;
     if(now-lastPose>=66 || flags!==lastFlags) {
-      const pose=playerSnapshot(controllerManager,name||playerName(s.playerId),getDay());
+      const pose=playerSnapshot(controllerManager,name||playerName(s.playerId),getDay(),camera);
       Object.assign(pose,hijack.packet());
       session.sendPose(pose,flags!==lastFlags);
       lastPose=now;lastFlags=flags;

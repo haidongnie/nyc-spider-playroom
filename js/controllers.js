@@ -477,16 +477,16 @@ class ThirdPersonControllerManager {
 
   // Find a fully clear arrival before moving the player. Sequential collision pushes can leave a player trapped
   // between overlapping buildings, so test whole candidate footprints instead; retain the old position if none fits.
-  findTeleportPosition(x, z, heading, altitude) {
+  findTeleportPosition(x, z, heading, altitude, {mode = this.activeMode, exactOnly = false} = {}) {
     if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
-    const heli = this.activeMode === 'helicopter';
-    const airborne = heli || this.activeMode === 'skycar';
-    const radius = heli ? 4.5 : this.activeMode === 'person' ? 0.48 : 0.65;
+    const heli = mode === 'helicopter';
+    const airborne = heli || mode === 'skycar';
+    const radius = heli ? 4.5 : mode === 'person' ? 0.48 : 0.65;
     const sinH = Math.sin(heading), cosH = Math.cos(heading);
-    const shape = collisionBody(this.activeMode, radius, heading, 0.1, this.getActiveEntity().streetDimensions);
+    const shape = collisionBody(mode, radius, heading, 0.1, this.entities[mode].streetDimensions);
     const reach = Math.max(shape.extX, shape.extZ);
     const margin = airborne ? 6000 : 0;
-    const entity = this.getActiveEntity();
+    const entity = this.entities[mode];
     // Conservative body cylinders, including the taxi's corners, bicycle wheels and helicopter tail/rotor.
     const body = { person: [0.48, 1.9], car: [2.4, 1.9], cyclist: [1.0, 1.9], helicopter: [6.2, 3.2], skycar: [3.4, SKYCAR.top] };
     const others = Object.values(this.entities).filter(e => e !== entity && (e.type !== 'skycar' || e.launched)).map(e => ({
@@ -508,7 +508,7 @@ class ThirdPersonControllerManager {
     };
     const clear = (p) => {
       if (!p) return false;
-      const baseY = airborne || (this.activeMode === 'person' && altitude > 2) ? altitude : this.getGroundHeight(p.x, p.z, this.activeMode);
+      const baseY = airborne || (mode === 'person' && altitude > 2) ? altitude : this.getGroundHeight(p.x, p.z, mode);
       // Keep other player models out of both the arrival and its default chase view. A corridor also prevents a
       // parked car between camera and character from hiding the character even when the camera itself is outside it.
       const viewTop = baseY + Math.max(body[entity.type][1], cameraUp);
@@ -525,6 +525,7 @@ class ThirdPersonControllerManager {
     };
     const origin = clampPoint(x, z);
     if (clear(origin)) return origin;
+    if (exactOnly) return null;
     // Four-metre rings cover nearby streets and courtyards, with bounded work even for a click inside a large block.
     const cx = origin ? origin.x : Math.max(ISLAND_BOUNDS.minX, Math.min(ISLAND_BOUNDS.maxX, x));
     const cz = origin ? origin.z : Math.max(ISLAND_BOUNDS.minZ + 30, Math.min(ISLAND_BOUNDS.maxZ, z));
