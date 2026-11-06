@@ -1,3 +1,4 @@
+import { flashCostume } from './flash-effects.js';
 // Peter Parker's original suit, skeleton and animation tracks from the user's
 // Friendly Neighborhood Spider-Man project. See ../spider-assets/NOTICE.txt.
 import * as THREE from 'three/webgpu';
@@ -217,6 +218,14 @@ export function createSpiderAvatar() {
   const reveal = createSuitReveal(root, civilian, spider);
   const duration = 1.15;
   let p = 0, target = 0;
+  let power = 'spider', setFlashAppearance;
+  function setPower(next) {
+    next = next === 'flash' ? 'flash' : 'spider';
+    if (power === next) return;
+    setFlashAppearance ??= flashCostume(spider, reveal);
+    power = next;
+    setFlashAppearance(next === 'flash');
+  }
   let previousPose = {};
   function poseCharacters(dt) {
     reveal.restore();
@@ -241,5 +250,5 @@ export function createSpiderAvatar() {
   }
   function getHand(side, point) { return reveal.hand(side, point); }
   setSuited(false, {immediate:true});
-  return {root, update, getHand, setSuited, get suitProgress() { return p; }};
+  return {root, update, getHand, setSuited, setPower, get power() { return power; }, get suitProgress() { return p; }};
 }

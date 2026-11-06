@@ -207,6 +207,7 @@ class ThirdPersonControllerManager {
     this._colliderCells = null; // built on first use, see nearColliders()
     this.activeMode = 'person';
     this.spiderSuited = false;
+    this.selectedPower = 'spider';
 
     this.keys = {
       forward: false,
@@ -267,7 +268,7 @@ class ThirdPersonControllerManager {
       left: ['KeyA', 'ArrowLeft'],
       right: ['KeyD', 'ArrowRight'],
       up: ['Space'],
-      down: ['KeyQ', 'KeyC'],
+      down: ['KeyC'],
       web: ['KeyR']
     };
     const actionsByCode = new Map(Object.entries(bindings).flatMap(([action, codes]) => codes.map((code) => [code, action])));
@@ -413,12 +414,23 @@ class ThirdPersonControllerManager {
     return this.entities[this.activeMode];
   }
 
+  setPower(power) {
+    const next = power === 'flash' ? 'flash' : 'spider';
+    if (next !== this.selectedPower) this.entities.person.web.release();
+    this.selectedPower = next;
+    this.entities.person.avatar.setPower(next);
+    this.setSpiderSuit(this.spiderSuited);
+  }
+
   setSpiderSuit(suited, {immediate = false} = {}) {
     this.spiderSuited = Boolean(suited);
     const person = this.entities.person;
-    if (!this.spiderSuited) person.web.release();
+    if (!this.spiderSuited || this.selectedPower !== 'spider') person.web.release();
+    if (!this.spiderSuited || this.selectedPower !== 'flash') {
+      person.web.groundSpeed = Math.min(person.web.groundSpeed, this.spiderSuited ? 10.5 : 8.2);
+    }
     person.avatar.setSuited(this.spiderSuited, {immediate});
-    person.label = this.spiderSuited ? 'Spider-Man' : 'Peter Parker';
+    person.label = this.spiderSuited ? (this.selectedPower === 'flash' ? 'The Flash' : 'Spider-Man') : 'Peter Parker';
     return this.spiderSuited;
   }
 

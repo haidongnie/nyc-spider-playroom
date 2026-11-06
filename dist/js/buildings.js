@@ -33,23 +33,13 @@ import {
   filteredPulse
 } from './tsl-materials.js';
 import { GEO } from './nyc-geodata.js';
-import { REAL_BUILDINGS } from './building-geodata.js';
+import { createDistrictCatalog, createDistrictStream } from './building-geodata.js';
 import { createBuildingFootprints } from './building-footprints.js';
+import {buildingStyle,mulberry32} from './building-style.js';
 import { polygonContains, polygonBoxOverlaps } from './building-collision.js';
 import { pavedPlazaRects, parkTreeSites, sidewalkBlocks } from './city-grid.js';
 
 // Surveyed footprints define buildings and collisions; architectural details stream around the player.
-
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a |= 0;
-    a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 /**
  * Spatial 2D quadtree for range queries around the active player/camera position.
@@ -119,6 +109,16 @@ class Quadtree {
       this.subdivide();
     }
     return this._insertIntoChildren(item);
+  }
+
+  remove(item) {
+    if (!this.containsPoint(item.cx,item.cz)) return;
+    if (this.divided) {
+      for (const child of [this.nw,this.ne,this.sw,this.se]) child.remove(item);
+    } else {
+      const index=this.items.indexOf(item);
+      if(index>=0)this.items.splice(index,1);
+    }
   }
 
   queryRange(cx, cz, radius, found = []) {
@@ -219,7 +219,7 @@ function buildCityBlocks(scene, landmarkColliders = []) {
   const materials = facades.map(([create, opts]) => create({ ...opts, footprintLocal: true }));
   const storeys = facades.map(([, opts]) => opts.floorHeight);
 
-  const broadwayBillboards = [];
+  const posterMaterials = new Map();
 
   // Times Square's billboard-facing walls look onto Broadway and 7th Avenue between 42nd and 47th St.
   const TS = (() => {
@@ -250,42 +250,50 @@ function buildCityBlocks(scene, landmarkColliders = []) {
     return { height: Infinity, x: t.x, z: t.z, x0: t.x - t.w / 2 - 3, x1: t.x + t.w / 2 + 3, z0: t.z - t.d / 2 - 3, z1: t.z + t.d / 2 + 3, ...(o || {}) };
   }).filter(Boolean);
   // Keep the authored landmark models; the survey supplies the surrounding buildings.
-  const surveyedBuildings = REAL_BUILDINGS.filter((b) => !LANDMARK_RESERVE.some((h) =>
+  const keepSurvey = (b) => !LANDMARK_RESERVE.some((h) =>
     b.polygons.some((p) => polygonContains({ outer: p.outer, holes: [] }, h.x, h.z)))
     && !landmarkColliders.some((c) => b.minX < c.maxX && b.maxX > c.minX && b.minZ < c.maxZ && b.maxZ > c.minZ
       && b.polygons.some((p) => polygonBoxOverlaps(p, (c.minX + c.maxX) / 2, (c.minZ + c.maxZ) / 2,
-        (c.maxX - c.minX) / 2, (c.maxZ - c.minZ) / 2))));
+        (c.maxX - c.minX) / 2, (c.maxZ - c.minZ) / 2)));
   const landmarkReserves = [...LANDMARK_RESERVE, ...landmarkColliders.map((c) =>
     ({ x0: c.minX, x1: c.maxX, z0: c.minZ, z1: c.maxZ, height: c.maxY ?? Infinity }))];
   const hitR = (a, x0, x1, z0, z1) => a.x0 < x1 && a.x1 > x0 && a.z0 < z1 && a.z1 > z0;
-  const buildingReserves = [];
+  let installing = null;
+  const districtRoot=new THREE.Group();
+  districtRoot.name="StreamedManhattan";
+  scene.add(districtRoot);
   const reserveCells = new Map();
   function addReserve(r) {
-    const index = buildingReserves.length;
-    buildingReserves.push(r);
+    if (installing) installing.extras.push(r);
     for (let ix = Math.floor(r.x0 / 128); ix <= Math.floor(r.x1 / 128); ix++) {
       for (let iz = Math.floor(r.z0 / 128); iz <= Math.floor(r.z1 / 128); iz++) {
         const key = ix + ',' + iz;
-        if (!reserveCells.has(key)) reserveCells.set(key, []);
-        reserveCells.get(key).push(index);
+        if (!reserveCells.has(key)) reserveCells.set(key, new Set());
+        reserveCells.get(key).add(r);
       }
     }
   }
-  for (const b of surveyedBuildings) addReserve({
-    x0: b.minX, x1: b.maxX, z0: b.minZ, z1: b.maxZ, height: b.height + 0.22, polygons: b.polygons
-  });
+  function removeReserve(r) {
+    for (let ix=Math.floor(r.x0/128); ix<=Math.floor(r.x1/128); ix++) {
+      for (let iz=Math.floor(r.z0/128); iz<=Math.floor(r.z1/128); iz++) {
+        const key=ix+','+iz, bucket=reserveCells.get(key);
+        bucket?.delete(r);
+        if(bucket && !bucket.size)reserveCells.delete(key);
+      }
+    }
+  }
   function nearbyReserves(b, padding = 0) {
     const minX = b.minX - padding, maxX = b.maxX + padding;
     const minZ = b.minZ - padding, maxZ = b.maxZ + padding;
     const found = new Set();
     for (let ix = Math.floor(minX / 128); ix <= Math.floor(maxX / 128); ix++) {
       for (let iz = Math.floor(minZ / 128); iz <= Math.floor(maxZ / 128); iz++) {
-        for (const index of reserveCells.get(ix + ',' + iz) || []) {
-          if (hitR(buildingReserves[index], minX, maxX, minZ, maxZ)) found.add(index);
+        for (const r of reserveCells.get(ix + ',' + iz) || []) {
+          if (hitR(r, minX, maxX, minZ, maxZ)) found.add(r);
         }
       }
     }
-    return Array.from(found, (index) => buildingReserves[index]);
+    return Array.from(found);
   }
   function overlapsParkOrLandmark(minX, maxX, minZ, maxZ) {
     const cp = CENTRAL_PARK_BOUNDS;
@@ -340,45 +348,132 @@ function buildCityBlocks(scene, landmarkColliders = []) {
     }
   }
 
-  const surveyedBuckets = materials.map(() => []);
-  const detailsToPlace = [];
-  for (const b of surveyedBuildings) {
-    const seed = Math.round(b.cx * 31 + b.cz * 17);
-    const rand = mulberry32(seed);
-    const tone = rand();
-    const mat = b.year && b.year < 1945 ? (tone < 0.8 ? 0 : 1)
-      : b.year && b.year < 1980 ? (tone < 0.55 ? 0 : 3)
-        : tone < 0.6 ? 2 : 4;
-    // The survey has no building-use data; choose retail independently of facade style and roof details.
-    const storefronts = b.height >= 6 && mulberry32(seed ^ 0x53544f52)() < 0.55;
-    const record = { ...b, tone, storefronts };
-    surveyedBuckets[mat].push(record);
-    const detail = {
-      cx: b.cx, cz: b.cz, minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ,
-      cornices: [], waterTowers: [], hvacUnits: [], fireEscapes: [], awnings: [], scaffoldSheds: [], footprints: []
-    };
-    const top = b.height + 0.22;
-    for (const polygon of b.polygons) {
-      const xs = polygon.outer.map((p) => p.x), zs = polygon.outer.map((p) => p.z);
-      const minX = Math.min(...xs), maxX = Math.max(...xs), minZ = Math.min(...zs), maxZ = Math.max(...zs);
-      colliders.push({ minX, maxX, minZ, maxZ, minY: 0, maxY: top, polygon });
-      detail.footprints.push({ h: top, pts: polygon.outer, holes: polygon.holes });
+  // A lightweight city-wide skyline remains visible from aircraft while the
+  // survey's exact facades, courtyards and rooftop details stay district-local.
+  const districts = createDistrictCatalog();
+  const coarseGeometry = new THREE.BoxGeometry(1,1,1);
+  const coarseMaterial = new THREE.MeshStandardMaterial({roughness:.87,metalness:.06});
+  const matrix=new THREE.Matrix4(), tone=new THREE.Color();
+  const navColliders=[];
+  function setShape(slot,polygons,active) {
+    slot.reserve.polygons=active?polygons:[];
+    for(let i=0;i<slot.parts.length;i++){
+      const part=slot.parts[i];
+      part.polygon=polygons[i];
+      part.minY=active?0:Infinity;
+      part.maxY=active?slot.height+.22:-Infinity;
     }
-    const neighbours = nearbyReserves(b, 6);
-    addSurveyedFireEscapes(b, detail, storeys[mat], neighbours);
-    detailsToPlace.push({ b: record, detail, masonry: mat < 2, rand });
-    allBlocks.push(detail);
+    slot.map.footprints=active?polygons.map(p=>({h:slot.height+.22,pts:p.outer,holes:p.holes})):[];
   }
-  // Reserve every fire escape before placing storefronts on neighbouring buildings.
-  for (const { b, detail, masonry, rand } of detailsToPlace) {
-    const neighbours = nearbyReserves(b, 6);
-    for (const reserve of addBuildingDetails(b, detail, { masonry, rand, neighbours })) addReserve(reserve);
-    quadtree.insert(detail);
+  allBlocks.mapDistricts=[];
+  for(const d of districts.values()){
+    const shown=[];
+    d.mapData={blocks:[],revision:0,minX:Infinity,maxX:-Infinity,minZ:Infinity,maxZ:-Infinity};
+    allBlocks.mapDistricts.push(d.mapData);
+    for(const slot of d.records){
+      slot.simple=slot.parts.map(p=>({outer:[{x:p.minX,z:p.minZ},{x:p.maxX,z:p.minZ},
+        {x:p.maxX,z:p.maxZ},{x:p.minX,z:p.maxZ}],holes:[]}));
+      slot.map={minX:slot.minX,maxX:slot.maxX,minZ:slot.minZ,maxZ:slot.maxZ,footprints:[]};
+      slot.reserve={x0:slot.minX,x1:slot.maxX,z0:slot.minZ,z1:slot.maxZ,height:slot.height+.22,polygons:slot.simple};
+      slot.visible=!slot.excluded;
+      slot.base=slot.navPolygons||slot.simple;
+      setShape(slot,slot.base,slot.visible);
+      for(const part of slot.parts) {colliders.push(part);if(slot.visible)navColliders.push({...part});}
+      addReserve(slot.reserve);
+      allBlocks.push(slot.map);
+      d.mapData.blocks.push(slot.map);
+      d.mapData.minX=Math.min(d.mapData.minX,slot.minX);d.mapData.maxX=Math.max(d.mapData.maxX,slot.maxX);
+      d.mapData.minZ=Math.min(d.mapData.minZ,slot.minZ);d.mapData.maxZ=Math.max(d.mapData.maxZ,slot.maxZ);
+      if(slot.visible && slot.height>0)shown.push(slot);
+    }
+    const coarse=new THREE.InstancedMesh(coarseGeometry,coarseMaterial,shown.length);
+    coarse.name='Skyline '+d.key;
+    for(const [i,b] of shown.entries()){
+      matrix.makeScale(Math.max(.5,b.maxX-b.minX),b.height,Math.max(.5,b.maxZ-b.minZ));
+      matrix.setPosition(b.cx,b.height*.5+.22,b.cz);coarse.setMatrixAt(i,matrix);
+      const colors=b.height>72?[0x788994,0x8898a1,0x9b9e9c]:[0xb59d86,0xb9ac99,0xa3978a,0xa89585];
+      tone.setHex(colors[Math.abs(Math.round(b.cx*7+b.cz*3))%colors.length]);coarse.setColorAt(i,tone);
+    }
+    coarse.computeBoundingSphere();d.coarse=coarse;districtRoot.add(coarse);
   }
-  surveyedBuckets.forEach((items, i) => {
-    if (!items.length) return;
-    group.add(createBuildingFootprints(materials[i], items, i < 2 ? b => nearbyReserves(b, 2) : undefined));
-  });
+  function installDistrict(d,data) {
+    const state={group:new THREE.Group(),details:[],extras:[]};
+    state.group.name='District '+d.key;
+    const surveyedBuildings=[];
+    d.current=state;
+    installing=state;
+    try {
+      for(const [i,b] of data.entries()){
+        const slot=d.records[i];
+        if(slot.parts.length!==b.polygons.length || slot.height!==b.height ||
+          slot.cx!==b.cx || slot.cz!==b.cz)throw Error('Mismatched buildings in '+d.key);
+        const active=keepSurvey(b);
+        setShape(slot,b.polygons,active);
+        if(active) {b.slot=slot;surveyedBuildings.push(b);}
+      }
+      const surveyedBuckets = materials.map(() => []);
+      const detailsToPlace = [];
+      for (const b of surveyedBuildings) {
+        const {seed, rand, tone, mat}=buildingStyle(b);
+        // The survey has no building-use data; choose retail independently of facade style and roof details.
+        const storefronts = b.height >= 6 && mulberry32(seed ^ 0x53544f52)() < 0.55;
+        const record = { ...b, tone, storefronts };
+        surveyedBuckets[mat].push(record);
+        const detail = {
+          cx: b.cx, cz: b.cz, minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ,
+          cornices: [], waterTowers: [], hvacUnits: [], fireEscapes: [], awnings: [], scaffoldSheds: [], footprints: []
+        };
+        const top = b.height + 0.22;
+        for (const polygon of b.polygons) {
+
+          detail.footprints.push({ h: top, pts: polygon.outer, holes: polygon.holes });
+        }
+        const neighbours = nearbyReserves(b, 6);
+        addSurveyedFireEscapes(b, detail, storeys[mat], neighbours);
+        detailsToPlace.push({ b: record, detail, masonry: mat < 2, rand });
+        state.details.push(detail);
+        b.slot.map.footprints=detail.footprints;
+      }
+      // Reserve every fire escape before placing storefronts on neighbouring buildings.
+      for (const { b, detail, masonry, rand } of detailsToPlace) {
+        const neighbours = nearbyReserves(b, 6);
+        for (const reserve of addBuildingDetails(b, detail, { masonry, rand, neighbours })) addReserve(reserve);
+        quadtree.insert(detail);
+      }
+      surveyedBuckets.forEach((items, i) => {
+        if (!items.length) return;
+        state.group.add(createBuildingFootprints(materials[i], items, i < 2 ? b => nearbyReserves(b, 2) : undefined));
+      });
+
+      addBillboardsForDistrict(surveyedBuildings,state.group);
+    } catch(error) {
+      removeDistrict(d);
+      throw error;
+    } finally {installing=null;}
+    d.coarse.visible=false;
+    districtRoot.add(state.group);
+    state.group.updateMatrixWorld(true);
+    d.mapData.revision++;
+    d.mapData.tones=null;
+    d.mapData.pathRevision=undefined;
+    allBlocks.revision=(allBlocks.revision||0)+1;
+    lastStreamX=Infinity;
+  }
+  function removeDistrict(d) {
+    const state=d.current;if(!state)return;
+    districtRoot.remove(state.group);
+    state.group.traverse(o=>{if(o.isMesh)o.geometry.dispose();});
+    for(const detail of state.details)quadtree.remove(detail);
+    for(const extra of state.extras)removeReserve(extra);
+    for(const slot of d.records)setShape(slot,slot.base,slot.visible);
+    d.current=null;d.coarse.visible=true;
+    d.mapData.revision++;
+    d.mapData.tones=null;
+    d.mapData.pathRevision=undefined;
+    allBlocks.revision=(allBlocks.revision||0)+1;
+    lastStreamX=Infinity;
+  }
+  const stream=createDistrictStream(districts,installDistrict,removeDistrict);
 
   // Narrow empty lots become sitting areas with trees.
   {
@@ -412,81 +507,87 @@ function buildCityBlocks(scene, landmarkColliders = []) {
     }
   }
 
-  // Times Square: tiers of billboards up every street wall that looks onto the bowtie (podiums and the tower
-  //     shafts set back above them alike), from above the storefront marquees to ~62 m, split into screens up to
-  //     ~26 m wide (the odd screen left out)
-  if (TS) {
-    const hash = (a, b) => Math.abs(Math.sin(a * 12.9898 + b * 78.233) * 43758.5453) % 1;
-    function addBillboards(cx, cz, nx, nz, length, base, top) {
-      if (length < 8 || top - base < 8) return;
-      const ax = -nz, az = nx;
-      const seen = [0.2, 0.5, 0.8].some((t) => [6, 12, 20, 30].some((d) => {
-        const u = (t - 0.5) * length;
-        return inBowtie(cx + nx * d + ax * u, cz + nz * d + az * u);
-      }));
-      if (!seen) return;
-      const n = Math.max(1, Math.ceil((length - 2) / 26));
-      const pw = (length - 2 - (n - 1) * 1.2) / n;
-      for (let i = 0; i < n; i++) {
-        const u = -length * 0.5 + 1 + i * (pw + 1.2) + pw * 0.5;
-        let y = base;
-        for (let tier = 0; y < top - 6; tier++) {
-          const h = Math.min(top - y, 8 + 8 * hash(u + tier, cx));
-          if (h < 6) break;
-          if (hash(cz + tier, u) > 0.12) {
-            broadwayBillboards.push({
-              x: cx + nx * 0.35 + ax * u,
-              y: y + h * 0.5,
-              z: cz + nz * 0.35 + az * u,
-              w: pw,
-              h,
-              rotY: Math.atan2(nx, nz),
-              variant: Math.floor(hash(cx + i, cz + tier) * 6)
-            });
+  function addBillboardsForDistrict(surveyedBuildings,districtGroup) {
+    // Times Square: tiers of billboards up every street wall that looks onto the bowtie (podiums and the tower
+    //     shafts set back above them alike), from above the storefront marquees to ~62 m, split into screens up to
+    //     ~26 m wide (the odd screen left out)
+    const broadwayBillboards=[];
+    if (TS) {
+      const hash = (a, b) => Math.abs(Math.sin(a * 12.9898 + b * 78.233) * 43758.5453) % 1;
+      function addBillboards(cx, cz, nx, nz, length, base, top) {
+        if (length < 8 || top - base < 8) return;
+        const ax = -nz, az = nx;
+        const seen = [0.2, 0.5, 0.8].some((t) => [6, 12, 20, 30].some((d) => {
+          const u = (t - 0.5) * length;
+          return inBowtie(cx + nx * d + ax * u, cz + nz * d + az * u);
+        }));
+        if (!seen) return;
+        const n = Math.max(1, Math.ceil((length - 2) / 26));
+        const pw = (length - 2 - (n - 1) * 1.2) / n;
+        for (let i = 0; i < n; i++) {
+          const u = -length * 0.5 + 1 + i * (pw + 1.2) + pw * 0.5;
+          let y = base;
+          for (let tier = 0; y < top - 6; tier++) {
+            const h = Math.min(top - y, 8 + 8 * hash(u + tier, cx));
+            if (h < 6) break;
+            if (hash(cz + tier, u) > 0.12) {
+              broadwayBillboards.push({
+                x: cx + nx * 0.35 + ax * u,
+                y: y + h * 0.5,
+                z: cz + nz * 0.35 + az * u,
+                w: pw,
+                h,
+                rotY: Math.atan2(nx, nz),
+                variant: Math.floor(hash(cx + i, cz + tier) * 6)
+              });
+            }
+            y += h + 1.2;
           }
-          y += h + 1.2;
+        }
+      }
+      for (const b of surveyedBuildings) {
+        if (b.maxZ < TS.zN - 40 || b.minZ > TS.zS + 40 || Math.abs(b.cx - TS.x7) > 280) continue;
+        for (const { outer } of b.polygons) {
+          for (let i = 0; i < outer.length; i++) {
+            const a = outer[i], c = outer[(i + 1) % outer.length];
+            const dx = c.x - a.x, dz = c.z - a.z, length = Math.hypot(dx, dz);
+            if (length < 8) continue;
+            addBillboards((a.x + c.x) / 2, (a.z + c.z) / 2, dz / length, -dx / length,
+              length, 7.5, Math.min(b.height + 0.22 - 2, 62));
+          }
         }
       }
     }
-    for (const b of surveyedBuildings) {
-      if (b.maxZ < TS.zN - 40 || b.minZ > TS.zS + 40 || Math.abs(b.cx - TS.x7) > 280) continue;
-      for (const { outer } of b.polygons) {
-        for (let i = 0; i < outer.length; i++) {
-          const a = outer[i], c = outer[(i + 1) % outer.length];
-          const dx = c.x - a.x, dz = c.z - a.z, length = Math.hypot(dx, dz);
-          if (length < 8) continue;
-          addBillboards((a.x + c.x) / 2, (a.z + c.z) / 2, dz / length, -dx / length,
-            length, 7.5, Math.min(b.height + 0.22 - 2, 62));
-        }
-      }
-    }
-  }
 
-  // ============================================================================
-  // STATIC BILLBOARDS
-  // ============================================================================
+    // ============================================================================
+    // STATIC BILLBOARDS
+    // ============================================================================
+
+
+    // Billboards: one merged mesh per poster theme
+    {
+      const byVariant = new Map();
+      const m = new THREE.Matrix4();
+      const q = new THREE.Quaternion();
+      const up = new THREE.Vector3(0, 1, 0);
+      for (const bb of broadwayBillboards) {
+        const g = new THREE.PlaneGeometry(bb.w, bb.h);
+        g.applyMatrix4(m.compose(new THREE.Vector3(bb.x, bb.y, bb.z), q.setFromAxisAngle(up, bb.rotY), new THREE.Vector3(1, 1, 1)));
+        if (!byVariant.has(bb.variant)) byVariant.set(bb.variant, []);
+        byVariant.get(bb.variant).push(g);
+      }
+      for (const [variant, geos] of byVariant) {
+        if(!posterMaterials.has(variant))posterMaterials.set(variant,createBillboardMaterial(variant));
+        const mesh = new THREE.Mesh(mergeGeometries(geos), posterMaterials.get(variant));
+        mesh.name = `TimesSquareBillboards_${variant}`;
+        districtGroup.add(mesh);
+        for (const g of geos) g.dispose();
+      }
+    }
+
+  }
   const unitBox = new THREE.BoxGeometry(1, 1, 1);
   const dummy = new THREE.Object3D();
-
-  // Billboards: one merged mesh per poster theme
-  {
-    const byVariant = new Map();
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const up = new THREE.Vector3(0, 1, 0);
-    for (const bb of broadwayBillboards) {
-      const g = new THREE.PlaneGeometry(bb.w, bb.h);
-      g.applyMatrix4(m.compose(new THREE.Vector3(bb.x, bb.y, bb.z), q.setFromAxisAngle(up, bb.rotY), new THREE.Vector3(1, 1, 1)));
-      if (!byVariant.has(bb.variant)) byVariant.set(bb.variant, []);
-      byVariant.get(bb.variant).push(g);
-    }
-    for (const [variant, geos] of byVariant) {
-      const mesh = new THREE.Mesh(mergeGeometries(geos), createBillboardMaterial(variant));
-      mesh.name = `TimesSquareBillboards_${variant}`;
-      group.add(mesh);
-      for (const g of geos) g.dispose();
-    }
-  }
 
   // ============================================================================
   // STREAMED ARCHITECTURAL DETAILS
@@ -907,6 +1008,8 @@ function buildCityBlocks(scene, landmarkColliders = []) {
     group,
     colliders,
     allBlocks,
+    navigationColliders:navColliders,
+    stream,
     update,
     updateLights
   };

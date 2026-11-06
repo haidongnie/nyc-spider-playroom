@@ -1,12 +1,16 @@
 // The user's Tripo GLB, with its own skin, texture and both original clips.
-// The GLB stays intact. Only the run's horizontal root motion is removed when
+// The starting GLB has the original mesh and animation buffers. Only the run's horizontal root motion is removed when
 // creating a runtime clip; the NYC controller already moves the actor.
 import * as THREE from 'three/webgpu';
 import { GLTFLoader } from './GLTFLoader.js';
 
-const response = await fetch(new URL('./civilian.glb', import.meta.url));
+const response = await fetch(new URL('./civilian-start.glb.gz', import.meta.url));
 if (!response.ok) throw new Error('Could not load the civilian character.');
-const gltf = await new GLTFLoader().parseAsync(await response.arrayBuffer(), '');
+const bytes = new Uint8Array(await response.arrayBuffer());
+const model = bytes[0] === 31 && bytes[1] === 139
+  ? await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()
+  : bytes.buffer;
+const gltf = await new GLTFLoader().parseAsync(model, '');
 const template = gltf.scene;
 template.updateMatrixWorld(true);
 template.traverse((mesh) => {
@@ -41,3 +45,39 @@ for (const source of gltf.animations) {
 }
 if (!clips.has('idle') || !clips.has('run')) throw new Error('Civilian motion clips are missing.');
 export const civilianRig = {template, clips, restBounds, height: 1.82, civilian: true};
+
+// The first street view uses a 1024px preview. Swap in the supplied 4096px
+// texture only after the city is playable. All local and remote rigs share it.
+window.addEventListener('nyc-playable', () => {
+  if (navigator.connection?.saveData) return;
+  const upgrade = async () => {
+    const map = template.getObjectByProperty('isSkinnedMesh', true)?.material.map;
+    if (!map) return;
+    const url = new URL('./civilian-full.jpg', import.meta.url).href;
+    const previous = map.image;
+    try {
+      let fullImage;
+      if (typeof ImageBitmap !== 'undefined' && previous instanceof ImageBitmap) {
+        const result = await fetch(url, {priority:'low'});
+        if (!result.ok) return;
+        fullImage = await createImageBitmap(await result.blob(), {
+          premultiplyAlpha:'none', colorSpaceConversion:'none'
+        });
+      } else {
+        fullImage = new Image();
+        fullImage.decoding = 'async';
+        fullImage.fetchPriority = 'low';
+        fullImage.src = url;
+        await fullImage.decode();
+      }
+      // WebGPU textures have immutable dimensions. Reallocate the 1024px GPU
+      // image while keeping the Texture object used by every local/remote rig.
+      map.dispose();
+      map.image = fullImage;
+      map.needsUpdate = true;
+      previous?.close?.();
+    } catch { /* Keep the ready preview on an interrupted connection. */ }
+  };
+  if (window.requestIdleCallback) window.requestIdleCallback(upgrade, {timeout:6000});
+  else setTimeout(upgrade, 1800);
+}, {once:true});

@@ -5,6 +5,10 @@
   "type": "module",
   "description": "Multiplayer Manhattan with Spider-Man and Cyber Web City Spinners, powered by Playroom Kit.",
   "scripts": {
-    "start": "node server.mjs"
+    "start": "node server.mjs",
+    "build": "node scripts/district-data.mjs && node scripts/build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
   }
 }

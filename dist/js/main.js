@@ -1,3 +1,6 @@
+import { createPowerPicker } from './power-picker.js';
+import { createFlashTrail } from './flash-effects.js';
+import { createVehicleRadio } from './vehicle-radio.js';
 import { createHijack } from './hijack.js';
 import { createMultiplayer } from './multiplayer.js';
 import * as THREE from 'three/webgpu';
@@ -5,7 +8,7 @@ import { pass, mrt, output, normalView, positionView, metalness, roughness, vec2
 import { ssr } from 'three/addons/tsl/display/SSRNode.js';
 import { createPostProcessing } from './post-processing.js';
 import { ClusteredLighting } from 'three/addons/lighting/ClusteredLighting.js';
-import { getLocationLabel, isTypingInField, ROADS, NYC_LANDMARKS, TELEPORT_LOCATIONS } from './city-config.js';
+import { getLocationLabel, isTypingInField, ROADS, NYC_LANDMARKS, TELEPORT_LOCATIONS, streetZ } from './city-config.js';
 import { buildCityGrid } from './city-grid.js';
 import { buildBoroughs } from './boroughs.js';
 import { buildLandmarks } from './landmarks.js';
@@ -55,8 +58,15 @@ async function initApp() {
   // Progress through the current stage, for stages that can measure it
   const setStageProgress = (f) => setLoadingProgress(loadingStage.from + (loadingStage.to - loadingStage.from) * f);
 
+  const stageText = /^zh/i.test(navigator.language) ? {
+    renderer:'正在启动图形引擎…', lighting:'正在布置光照…', cityGrid:'正在生成路网…',
+    boroughs:'正在准备桥梁和周边城区…', landmarks:'正在准备地标…', blocks:'正在加载附近街区…',
+    streetDetails:'正在布置附近街道…', traffic:'正在安排车辆和行人…', roadPaint:'正在绘制路面标线…',
+    controllers:'正在准备角色和载具…', culling:'正在准备视野内的建筑…', ui:'正在准备地图和界面…',
+    postFX:'正在准备光影…', compile:'正在编译街景材质…', warmup:'正在绘制出生点…', gpu:'正在显示第一帧…'
+  } : null;
   function beginLoadingStage(message, name, glide = true) {
-    if (loadingStatus) loadingStatus.textContent = message;
+    if (loadingStatus) loadingStatus.textContent = stageText?.[name] || message;
     const index = stageNames.indexOf(name);
     const before = stageNames.slice(0, index).reduce((sum, n) => sum + STAGE_MS[n], 0);
     loadingStage = { from: before / totalStageMs, to: (before + STAGE_MS[name]) / totalStageMs };
@@ -126,8 +136,17 @@ async function initApp() {
   markInit('landmarks');
   await showLoadingStage('Generating building footprints and facades...', 'blocks');
   const cityBlocks = buildCityBlocks(scene, landmarkColliders);
+  let savedPlayer=null;
+  try {savedPlayer=JSON.parse(localStorage.getItem('nyc-player-state'));} catch {}
+  const prior=(savedPlayer?.version===1 || savedPlayer?.version===2) ? savedPlayer.entities?.[savedPlayer.activeMode] : null;
+  const spawn=prior && [prior.x,prior.z].every(Number.isFinite) ? prior : {x:-11.6,z:streetZ(37)+12};
+  await cityBlocks.stream.ensureAt(spawn.x,spawn.z);
   markInit('blocks');
-  const allColliders = [...landmarkColliders, ...cityBlocks.colliders, ...boroughs.colliders, ...(cityGrid.colliders || [])];
+  const fixedColliders=[...landmarkColliders,...boroughs.colliders,...(cityGrid.colliders||[])];
+  const allColliders = [...fixedColliders,...cityBlocks.colliders];
+  // Road topology and ambient flight planning are shared between room members,
+  // independently of the player's current district or saved location.
+  const navigationColliders=[...fixedColliders,...cityBlocks.navigationColliders];
 
   await showLoadingStage('Placing trees, streetlights and street furniture...', 'streetDetails');
   const streetDetails = buildStreetDetails(scene, allColliders);
@@ -139,11 +158,11 @@ async function initApp() {
   const trafficSystem = createTrafficSystem(scene, cityGrid.sidewalks, [
     ...cityGrid.footprints,
     ...streetDetails.footprints,
-    ...allColliders.filter((c) => !c.obb && (c.minY ?? 0) < 3.5)
+    ...navigationColliders.filter((c) => !c.obb && (c.minY ?? 0) < 3.5)
   ], streetDetails.signalIntersections);
   markInit('traffic');
   const highwayTraffic = createHighwayTraffic(scene, cityGrid.highwayLanes);
-  const airTraffic = createAirTraffic(scene, { roadNetwork: trafficSystem.network, colliders: allColliders });
+  const airTraffic = createAirTraffic(scene, { roadNetwork: trafficSystem.network, colliders: navigationColliders });
   const airLights = createAirTrafficLights(scene, airTraffic.group);
   await showLoadingStage('Adding road markings...', 'roadPaint');
   buildRoadPaint(scene, trafficSystem.network, cityGrid.roadPaint);
@@ -152,10 +171,11 @@ async function initApp() {
   // 4. Initialize player vehicles and the camera system
   await showLoadingStage('Preparing player, vehicles and controls...', 'controllers');
   const controllerManager = new ThirdPersonControllerManager(scene, allColliders);
+  controllerManager.ensureDistrictAt=cityBlocks.stream.ensureAt;
   let hijack, savedStreetCar=null;
   // Reuse teleport placement so saved players return at rest, close to their last positions.
   try {
-    const saved = JSON.parse(localStorage.getItem('nyc-player-state'));
+    const saved = savedPlayer;
     if (saved?.version === 1 || saved?.version === 2) {
       savedStreetCar=saved.hijack;
       for (const mode of Object.keys(controllerManager.entities)) {
@@ -165,6 +185,7 @@ async function initApp() {
         controllerManager.teleportActiveTo(p.x, p.z, p.heading, p.y);
       }
       controllerManager.setMode(saved.version === 2 && Object.hasOwn(controllerManager.entities, saved.activeMode) ? saved.activeMode : 'person', {dismount:false});
+      controllerManager.setPower(saved.selectedPower);
       controllerManager.setSpiderSuit(saved.version === 2 && saved.spiderSuited === true, {immediate:true});
     }
   } catch { /* Missing or unavailable storage does not prevent playing. */ }
@@ -176,7 +197,7 @@ async function initApp() {
         .map(([mode, entity]) => [mode, {
           x: entity.position.x, y: entity.position.y, z: entity.position.z, heading: entity.heading
         }]));
-      localStorage.setItem('nyc-player-state', JSON.stringify({ version: 2, activeMode: controllerManager.activeMode, spiderSuited: controllerManager.spiderSuited, hijack:hijack?.save(), entities }));
+      localStorage.setItem('nyc-player-state', JSON.stringify({ version: 2, activeMode: controllerManager.activeMode, spiderSuited: controllerManager.spiderSuited, selectedPower: controllerManager.selectedPower, hijack:hijack?.save(), entities }));
     } catch { /* Storage may be disabled or full. */ }
   }
 
@@ -186,7 +207,9 @@ async function initApp() {
   const audioSystem = new CityAudioSystem({ controllerManager, trafficSystem, highwayTraffic, airTraffic, streetDetails }, {
     onStateChange: updateSoundButton
   });
+  const radio = createVehicleRadio(audioSystem);
   function updateSoundButton() {
+    radio.sync();
     if (!soundButton) return;
     soundButton.disabled = !audioSystem.supported;
     soundButton.setAttribute('aria-pressed', String(audioSystem.enabled));
@@ -324,14 +347,14 @@ async function initApp() {
     person: [[['W', 'S'], 'Run / Turn back'], [['A', 'D'], 'Turn'], [['Space'], 'Jump'], [['E'], 'Take nearby car']],
     car: [[['W', 'S'], 'Drive / Reverse'], [['A', 'D'], 'Steer'], [['B'], 'Horn'], [['E'], 'Exit when slow']],
     cyclist: [[['W', 'S'], 'Pedal / Brake'], [['A', 'D'], 'Lean & Turn']],
-    helicopter: [[['W', 'S'], 'Pitch'], [['A', 'D'], 'Yaw'], [['Space'], 'Ascend'], [['Q', 'C'], 'Descend']],
-    skycar: [[['W', 'S'], 'Throttle / Brake'], [['A', 'D'], 'Steer'], [['Space'], 'Ascend'], [['Q', 'C'], 'Descend']]
+    helicopter: [[['W', 'S'], 'Pitch'], [['A', 'D'], 'Yaw'], [['Space'], 'Ascend'], [['C'], 'Descend']],
+    skycar: [[['W', 'S'], 'Throttle / Brake'], [['A', 'D'], 'Steer'], [['Space'], 'Ascend'], [['C'], 'Descend']]
   };
   // Top speeds in mph set the full scale of the speed meter.
   const topSpeedMph = { person: 18, car: 81, cyclist: 43, helicopter: 116, skycar: 179 };
 
   const chineseHints = /^zh(?:-|$)/i.test(navigator.language) ? {
-    'Run / Turn back':'向前跑 / 回头跑', Turn:'转向', Jump:'跳跃', 'Take nearby car':'靠近车门劫车',
+    'Run / Turn back':'向前跑 / 回头跑', Turn:'转向', Jump:'跳跃', 'Transform':'变身', 'Take nearby car':'靠近车门劫车',
     'Hold to swing':'按住射丝摆荡', 'Drive / Reverse':'前进 / 倒车', Steer:'转向', Horn:'鸣笛',
     'Exit when slow':'减速后下车', 'Pedal / Brake':'骑行 / 刹车', 'Lean & Turn':'倾身转向',
     Pitch:'俯仰', Yaw:'转向', Ascend:'上升', Descend:'下降', 'Throttle / Brake':'加速 / 减速',
@@ -340,7 +363,8 @@ async function initApp() {
   function renderControlHints(mode) {
     if (!elControlsHint) return;
     const hints = [...(controlHints[mode] || [])];
-    if (mode === 'person' && controllerManager.spiderSuited) hints.push([['R'], 'Hold to swing']);
+    if (mode === 'person' && controllerManager.spiderSuited && controllerManager.selectedPower === 'spider') hints.push([['R'], 'Hold to swing']);
+    hints.push([['Q'], 'Transform']);
     const mouseHint = {click: [['Click'], 'Mouse look'], locked: [['Esc'], 'Free cursor'], soft: [['Esc'], 'Free cursor'], drag: [['Drag'], 'Look']};
     if (mouseHint[cameraSystem.mouseLookMode]) hints.push(mouseHint[cameraSystem.mouseLookMode]);
     const items = hints.map(([keys, action]) => {
@@ -373,6 +397,7 @@ async function initApp() {
   function selectMode(mode, options) {
     controllerManager.setMode(mode, options);
     hijack?.switched(mode);
+    radio.setMode(controllerManager.activeMode);
     touchControls.setMode(controllerManager.activeMode);
     gamepadControls.reset();
     modeButtons.forEach((btn) => {
@@ -395,17 +420,27 @@ async function initApp() {
   function syncHeroPortrait() {
     const suited = controllerManager.spiderSuited;
     portrait.setAttribute('aria-pressed',String(suited));
-    portrait.title = suited ? 'Change to civilian clothes' : 'Become Spider-Man';
+    powerPicker.sync();
     const active = controllerManager.getActiveEntity();
     if (elMode) elMode.textContent = active.label;
     touchControls.updateActions(controllerManager.activeMode);
     renderControlHints(controllerManager.activeMode);
   }
-  portrait.addEventListener('click', () => {
+  function togglePower() {
     controllerManager.setSpiderSuit(!controllerManager.spiderSuited);
     syncHeroPortrait();
     savePlayerState();
+  }
+  const powerPicker = createPowerPicker(portrait, controllerManager, {
+    onToggle: togglePower,
+    onChoose(power) {
+      controllerManager.setPower(power);
+      controllerManager.setSpiderSuit(true);
+      syncHeroPortrait();
+      savePlayerState();
+    }
   });
+  const flashTrail = createFlashTrail(scene);
   controllerManager.setSpiderSuit(controllerManager.spiderSuited, {immediate:true});
   syncHeroPortrait();
 
@@ -546,7 +581,13 @@ async function initApp() {
     elLocation.replaceChildren(...nodes);
   }
 
-  function teleportTo(x, z, heading = Math.PI) {
+  let teleportRequest=0;
+  async function teleportTo(x, z, heading = Math.PI) {
+    const request=++teleportRequest;
+    try {await cityBlocks.stream.ensureAt(x,z);} catch (error) {
+      console.warn('[district] Teleport destination unavailable',error); return;
+    }
+    if(request!==teleportRequest)return;
     const destination = controllerManager.teleportActiveTo(x, z, heading);
     touchControls.reset();
     gamepadControls.reset();
@@ -605,6 +646,10 @@ async function initApp() {
   window.addEventListener('keydown', (e) => {
     if (isTypingInField(e)) return;
     switch (e.code) {
+      case 'KeyQ':
+        if (!e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !e.target?.isContentEditable &&
+          !mapSystem.isFullMapOpen && !document.querySelector('dialog[open]')) { e.preventDefault(); togglePower(); }
+        break;
       case 'KeyE':
         if(!e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && hijack?.act()) e.preventDefault();
         break;
@@ -686,84 +731,73 @@ async function initApp() {
   if (document.fonts) document.fonts.ready.then(placeModeIndicator);
   markInit('ui');
 
-  // Compile shaders behind the loading screen. Overlapping compileAsync() jobs keep compilation moving
-  // while individual jobs yield to the browser.
-  const COMPILE_POOL = 16;
-  const nextTask = () => (globalThis.scheduler?.yield ? globalThis.scheduler.yield() : new Promise((resolve) => setTimeout(resolve, 0)));
-  async function precompileShaders() {
+  // Prepare only the materials the starting camera will draw. The renderer
+  // compiles newly visible geometry normally when a player turns or travels.
+  async function precompileStartingView() {
     await showLoadingStage('Preparing reflections and bloom...', 'postFX');
-    // An empty frame first: it sets up the post-processing chain, which configures the scene pass's render target
-    // (MSAA samples, depth format), so the pipelines compiled below are the very ones the scene pass asks for
+    cameraSystem.update(0, 0);
+    lightingSystem.update(cameraSystem.currentPos);
+    updateSceneCulling(cameraSystem.currentPos);
+
+    // This pass configures the MRT formats, reversed depth and MSAA samples
+    // before scene compilation, so the first street frame can reuse its pipelines.
     scene.visible = false;
-    renderPipeline.render();
-    scene.visible = true;
+    try {
+      renderPipeline.render();
+    } finally {
+      scene.visible = true;
+    }
     markInit('postFX');
 
-    // Every visible object with frustum culling off (like the warm-up frame, see the loop). Plain meshes that share
-    // a material share its shader, so one job compiles them in turn (the first build serves the rest); every
-    // instanced mesh gets a build of its own unless its chunks share a pipeline
-    const culled = [];
-    const jobs = [];
-    const jobByMaterial = new Map();
-    const pipelines = new Set();
-    scene.traverseVisible((o) => {
-      if (o.frustumCulled) {
-        culled.push(o);
-        o.frustumCulled = false;
-      }
-      if (!o.isMesh && !o.isLine && !o.isPoints && !o.isSprite) return;
-      // Use the first visible chunk: the original representative may be in an inactive tree cell. Shadow stand-ins
-      // only draw in the shadow maps (the warm-up frame compiles those).
-      if (o.userData.shadowProxy) return;
-      const pipeline = o.userData.sharesPipelineWith || o;
-      if (pipelines.has(pipeline)) return;
-      pipelines.add(pipeline);
-      if (o.isInstancedMesh || Array.isArray(o.material)) {
-        jobs.push([o]);
-        return;
-      }
-      let job = jobByMaterial.get(o.material);
-      if (!job) {
-        job = [];
-        jobByMaterial.set(o.material, job);
-        jobs.push(job);
-      }
-      job.push(o);
+    const camera = cameraSystem.camera;
+    camera.updateMatrixWorld(true);
+    const projection = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    const frustum = new THREE.Frustum().setFromProjectionMatrix(projection, camera.coordinateSystem, camera.reversedDepth);
+    const seen = new Set();
+    const objects = [];
+    scene.traverseVisible((object) => {
+      if ((!object.isMesh && !object.isLine && !object.isPoints && !object.isSprite) ||
+          object.userData.shadowProxy || !object.layers.test(camera.layers)) return;
+      if (object.frustumCulled && !(object.isSprite ? frustum.intersectsSprite(object) : frustum.intersectsObject(object))) return;
+      // Static chunks share a shader with the other chunks of their source.
+      // Ordinary meshes can share a material; instances may have distinct attributes.
+      const key = object.userData.sharesPipelineWith ||
+        (object.isInstancedMesh || object.isSkinnedMesh || Array.isArray(object.material) ? object : object.material);
+      if (seen.has(key)) return;
+      seen.add(key);
+      objects.push(object);
     });
 
-    await showLoadingStage(`Compiling scene shaders... 0 / ${jobs.length} batches`, 'compile', false);
+    await showLoadingStage('Compiling the starting view...', 'compile', false);
     renderer.setRenderTarget(scenePass.renderTarget);
     renderer.setMRT(sceneMRT);
-    const compile = async (object) => {
-      // Each compile starts in a task of its own: compileAsync() keeps one precompilation state on the renderer,
-      // which must not be mid-step for two of them in the same microtask checkpoint
-      await nextTask();
-      try {
-        await renderer.compileAsync(object, cameraSystem.camera, scene);
-      } catch (e) {
-        console.warn('[compile]', e); // the warm-up frame compiles it instead
+    let next = 0, completed = 0;
+    async function worker() {
+      while (next < objects.length) {
+        const object = objects[next++];
+        // Let each compile start in its own browser task while other pipeline
+        // creation promises are in flight.
+        if (globalThis.scheduler?.yield) await globalThis.scheduler.yield();
+        else await new Promise(resolve => setTimeout(resolve, 0));
+        try {
+          await renderer.compileAsync(object, camera, scene);
+        } catch (error) {
+          console.warn('[compile]', error); // The normal render will compile this material.
+        }
+        setStageProgress(++completed / objects.length);
       }
-    };
-    let next = 0;
-    let done = 0;
-    const worker = async () => {
-      while (next < jobs.length) {
-        const job = jobs[next++];
-        for (const object of job) await compile(object);
-        done++;
-        if (loadingStatus) loadingStatus.textContent = `Compiling scene shaders... ${done} / ${jobs.length} batches`;
-        setStageProgress(done / jobs.length);
-      }
-    };
-    await Promise.all(Array.from({ length: COMPILE_POOL }, worker));
-    renderer.setMRT(null);
-    renderer.setRenderTarget(null);
-    for (const o of culled) o.frustumCulled = true;
+    }
+    try {
+      await Promise.all(Array.from({length: Math.min(16, objects.length)}, worker));
+    } finally {
+      renderer.setMRT(null);
+      renderer.setRenderTarget(null);
+    }
   }
 
-  await precompileShaders();
+  await precompileStartingView();
   markInit('compile');
-  await showLoadingStage('Preparing shadows and the first frame...', 'warmup');
+  await showLoadingStage('Drawing your first street view...', 'warmup');
 
   const multiplayer = createMultiplayer({
     scene, controllerManager, trafficSystem, highwayTraffic, airTraffic, hijack, selectMode,
@@ -782,7 +816,7 @@ async function initApp() {
   let frameCount = 0;
   let fpsTimer = 0;
   let nextPlayerSave = 0;
-  let warmedUp = false; // see the first frame below
+  let firstFrameSubmitted = false;
 
   if (elFps) elFps.textContent = '60';
 
@@ -798,6 +832,10 @@ async function initApp() {
     hijack.update();
     controllerManager.update(dt, elapsed, cameraSystem);
     cameraSystem.update(dt, elapsed);
+    const runner = controllerManager.entities.person;
+    const sprinting = controllerManager.activeMode === 'person' && controllerManager.spiderSuited &&
+      controllerManager.selectedPower === 'flash' && Math.abs(runner.speed) > 3;
+    flashTrail.update(dt, runner.position, runner.heading, sprinting, runner.avatar.root);
     controllerManager.entities.person.avatar.root.visible = cameraSystem.activePresetId !== 'pov';
     streetDetails.signalClock.value = cityClock;
     trafficSystem.update(
@@ -816,44 +854,28 @@ async function initApp() {
       nextPlayerSave = now + 5000;
     }
     if (boroughs.update) boroughs.update(elapsed); // Roosevelt Island Tramway cabins
+    if (!loadingOverlay || loadingOverlay.classList.contains('hidden')) {
+      cityBlocks.stream.update(cameraSystem.currentPos.x,cameraSystem.currentPos.z,controllerManager.getActiveEntity().position);
+    }
     cityBlocks.update(cameraSystem.currentPos.x, cameraSystem.currentPos.z);
     if (cityBlocks.updateLights) cityBlocks.updateLights(cameraSystem.camera);
     if (streetDetails.update) streetDetails.update(cameraSystem.camera);
     lightingSystem.update(cameraSystem.currentPos);
     mapSystem.update();
     audioSystem.update(dt, elapsed, cameraSystem.camera, lightingSystem.activePresetId === 'midnight');
-    if (warmedUp) updateSceneCulling(cameraSystem.camera.position); // the warm-up frame draws every chunk
+    updateSceneCulling(cameraSystem.camera.position);
     // Traffic collisions can move the player after controller updates; finalize moving hierarchies here.
     for (const root of dynamicRoots) root.updateMatrixWorld();
     multiplayer.after(dt, cameraSystem.camera, now);
     if (artStyle === 'anime') colorGrade.updateArtStyle();
 
     // Render frame via TSL RenderPipeline (SSR + Bloom)
-    if (!warmedUp) {
-      // First frame = pipeline warm-up behind the loading screen, for what precompileShaders() can't reach (the shadow
-      // map passes): with frustum culling off, every visible material's pipelines compile now instead of stalling the
-      // first time the camera turns towards it (one chunk / shadow stand-in per shared pipeline is enough)
-      const culled = [];
-      const pipelines = new Set();
-      scene.traverseVisible((o) => {
-        const pipeline = o.userData.sharesPipelineWith || o;
-        if (pipelines.has(pipeline)) return;
-        pipelines.add(pipeline);
-        if (o.frustumCulled) {
-          culled.push(o);
-          o.frustumCulled = false;
-        }
-      });
-      renderPipeline.render();
-      for (const o of culled) o.frustumCulled = true;
-      markInit('warmup');
-    }
     renderPipeline.render();
-    if (!warmedUp) {
-      warmedUp = true;
+    if (!firstFrameSubmitted) {
+      firstFrameSubmitted = true;
       markInit('firstFrame');
-      // The loading screen stays up until the GPU has got through the first frame (and the pipelines its warm-up
-      // compiled), i.e. until the city is actually on screen
+      // Keep the loading screen until the GPU has drawn this real street view,
+      // including its cascaded shadows and post-processing.
       const device = renderer.backend.device;
       beginLoadingStage('Waiting for graphics to finish the first frame...', 'gpu');
       Promise.resolve(device && device.queue.onSubmittedWorkDone()).catch(() => {}).then(() => {
@@ -863,6 +885,7 @@ async function initApp() {
         setLoadingProgress(1);
         if (loadingOverlay) loadingOverlay.classList.add('hidden');
         audioSystem.ready = true;
+        window.dispatchEvent(new Event('nyc-playable'));
         multiplayer.startInvite();
       });
     }
@@ -886,7 +909,7 @@ async function initApp() {
         elFps.className = currentFps >= 50 ? 'fps-ok' : currentFps >= 30 ? 'fps-warn' : 'fps-bad';
       }
       if (elSpeed) elSpeed.textContent = String(mph);
-      if (elSpeedMeter) elSpeedMeter.style.transform = `scaleX(${Math.min(1, mph / (topSpeedMph[mode] || 80))})`;
+      if (elSpeedMeter) elSpeedMeter.style.transform = `scaleX(${Math.min(1, mph / (mode === 'person' && controllerManager.spiderSuited && controllerManager.selectedPower === 'flash' ? 184 : (topSpeedMph[mode] || 80)))})`;
       if (elAltitude) elAltitude.textContent = altFt.toLocaleString('en-US');
       // The street corner of the player on the follow cameras, of the camera itself on the scenic ones
       const where = cameraSystem.getActivePreset().category === 'follow' ? activeEnt.position : cameraSystem.currentPos;
@@ -895,4 +918,7 @@ async function initApp() {
   });
 }
 
-initApp();
+initApp().catch(error => {
+  console.error('[init]', error);
+  window.dispatchEvent(new Event('nyc-load-error'));
+});

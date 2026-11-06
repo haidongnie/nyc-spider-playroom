@@ -250,15 +250,17 @@ export class SpiderSwing {
     p.heading += clamp(Math.atan2(Math.sin(angle), Math.cos(angle)), -12 * dt, 12 * dt);
     // Accelerate out of the turn rather than initially running away from the camera.
     const target = (forward || backward * 0.65) * runSpeed * Math.max(0, Math.cos(this.groundFacing - p.heading));
-    this.groundSpeed += clamp(target - this.groundSpeed, -18 * dt, 18 * dt);
+    const acceleration = 18 * (runSpeed === 82 ? 10 : 1) * dt;
+    this.groundSpeed += clamp(target - this.groundSpeed, -acceleration, acceleration);
     this.velocity.set(Math.sin(p.heading) * this.groundSpeed, 0, Math.cos(p.heading) * this.groundSpeed);
   }
   advance(dt, keys, view) {
     const p = this.person,
       pos = p.position,
       v = this.velocity;
-    const suited = this.manager.spiderSuited !== false;
-    const runSpeed = suited ? 10.5 : 8.2;
+    const flash = this.manager.spiderSuited && this.manager.selectedPower === 'flash';
+    const suited = this.manager.spiderSuited !== false && !flash;
+    const runSpeed = flash ? 82 : suited ? 10.5 : 8.2;
     const web = suited && Boolean(keys.web),
       jump = Boolean(keys.up),
       shoot = web && !this.webWasDown,
@@ -317,7 +319,7 @@ export class SpiderSwing {
       v.x = v.x * drag + (fx * forward + Math.cos(p.heading) * turn * 0.72) * 14 * dt;
       v.z = v.z * drag + (fz * forward - Math.sin(p.heading) * turn * 0.72) * 14 * dt;
     }
-    v.clampLength(0, 55);
+    v.clampLength(0, flash ? 85 : 55);
     pos.addScaledVector(v, dt);
     if (this.anchor) {
       this.pivot.copy(pos);

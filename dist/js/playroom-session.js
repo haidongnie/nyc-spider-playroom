@@ -144,6 +144,8 @@ export function createPlayroomSession({
     s.peers.set(id, record);
     record.off = player.onQuit(() => removePeer(s, id));
     onPeerJoin(id);
+    // A newcomer should see a stationary or backgrounded player before their next frame.
+    if (s.lastPose) sendPose(s.lastPose, true);
     summarize(s);
   }
   function authority(s, id) {
