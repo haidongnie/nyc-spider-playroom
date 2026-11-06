@@ -4,12 +4,13 @@
 import * as THREE from 'three/webgpu';
 import { GLTFLoader } from './GLTFLoader.js';
 
-const response = await fetch(new URL('./civilian-start.glb.gz', import.meta.url));
-if (!response.ok) throw new Error('Could not load the civilian character.');
-const bytes = new Uint8Array(await response.arrayBuffer());
-const model = bytes[0] === 31 && bytes[1] === 139
-  ? await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()
-  : bytes.buffer;
+import { loadGameAsset } from '../js/asset-fetch.js';
+const model = await loadGameAsset(new URL('./civilian-start.glb.gz', import.meta.url), bytes => {
+  if (bytes.length < 12) throw Error('Incomplete civilian GLB.');
+  const header = new DataView(bytes.buffer);
+  if (header.getUint32(0,true) !== 0x46546c67 || header.getUint32(8,true) !== bytes.length) throw Error('Invalid civilian GLB.');
+  return bytes.buffer;
+});
 const gltf = await new GLTFLoader().parseAsync(model, '');
 const template = gltf.scene;
 template.updateMatrixWorld(true);

@@ -3,14 +3,14 @@
 import { decodeBuildingRecords, decodeDistrictRecords } from './building-codec.js';
 import { DISTRICT_SIZE, START_DISTRICT_RADIUS } from './district-layout.js';
 
-export async function readDistrictFile(name) {
-  const response = await fetch(new URL('./districts/' + name + '.bin.gz', import.meta.url));
-  if (!response.ok) throw Error('Building district ' + name + ': HTTP ' + response.status);
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) return bytes;
-  return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+import { loadGameAsset } from './asset-fetch.js';
+export function readDistrictFile(name, decode, signal) {
+  return loadGameAsset(new URL('./districts/' + name + '.bin.gz', import.meta.url), decode, signal);
 }
-const bytes = await readDistrictFile('overview');
+const bytes = await readDistrictFile('overview', buffer => {
+  if (buffer.length < 16 || buffer[0] === 0) throw Error('Incomplete building overview.');
+  return buffer;
+});
 export function createDistrictCatalog() {
   let cursor = 0;
   function uint() {
@@ -53,20 +53,25 @@ function distance(district,x,z) {
   return Math.hypot(dx,dz);
 }
 export function createDistrictStream(districts, install, remove) {
-  const cache = new Map();
+  const cache = new Map(), failedNearby = new Set();
   let busy=0, lastFocus=null;
   const frame=()=>new Promise(resolve=>setTimeout(resolve,0));
   function acquire(district) {
     let state=cache.get(district.key);
     if(state) return state.promise;
-    state={installed:false};cache.set(district.key,state);busy++;
+    state={installed:false,controller:new AbortController()};cache.set(district.key,state);busy++;
     state.promise=(async()=>{
-      const data=decodeDistrictRecords(await readDistrictFile(district.key));
+      const data=await readDistrictFile(district.key,decodeDistrictRecords,state.controller.signal);
       if(data.length!==district.records.length)throw Error('Invalid building district '+district.key);
       await frame();
+      if(state.controller.signal.aborted)throw state.controller.signal.reason;
       install(district,data);
       state.installed=true;
-    })().catch(error=>{cache.delete(district.key);throw error;}).finally(()=>{busy--;});
+    })().catch(error=>{
+      if(cache.get(district.key)===state)cache.delete(district.key);
+      if(!state.controller.signal.aborted)failedNearby.add(district.key);
+      throw error;
+    }).finally(()=>{busy--;});
     return state.promise;
   }
   function required(x,z,radius) {
@@ -75,7 +80,7 @@ export function createDistrictStream(districts, install, remove) {
   }
   async function ensureAt(x,z) {
     const targets=required(x,z,START_DISTRICT_RADIUS);
-    for(const {d} of targets)d.pins=(d.pins||0)+1;
+    for(const {d} of targets){failedNearby.delete(d.key);d.pins=(d.pins||0)+1;}
     try {await Promise.all(targets.map(({d})=>acquire(d)));}
     finally {
       for(const {d} of targets){d.pins--;d.keepUntil=performance.now()+1200;}
@@ -89,22 +94,28 @@ export function createDistrictStream(districts, install, remove) {
     for(const point of [{x,z},player])for(const item of required(point.x,point.z,1100)){
       const prior=wanted.get(item.d.key);if(!prior||item.range<prior.range)wanted.set(item.d.key,item);
     }
+    for (const key of failedNearby) if (!wanted.has(key)) failedNearby.delete(key);
     const ordered=[...wanted.values()].sort((a,b)=>a.range-b.range);
     for(const {d} of ordered) {
       if(cache.has(d.key))continue;
       if(busy>=1)break;
-      if(performance.now()<(d.retryAfter||0))continue;
-      acquire(d).catch(error=>{d.retryAfter=performance.now()+10000;console.warn('[district]',error.message);});
+      if(failedNearby.has(d.key))continue;
+      acquire(d).catch(error=>{if(error.name!=='AbortError')console.warn('[district]',error.message);});
       break;
     }
     let retiring=false;
     for(const [key,state] of cache) {
       const d=districts.get(key);
+      if(!state.installed && !d.pins && !wanted.has(key)) {
+        cache.delete(key);
+        state.controller.abort();
+        continue;
+      }
       if(!state.installed || distance(d,x,z)<=2300 || distance(d,player.x,player.z)<=2300)continue;
       if(d.pins || performance.now()<(d.keepUntil||0)){retiring=true;continue;}
       remove(d);cache.delete(key);
     }
-    lastFocus={x,z,px:player.x,pz:player.z,settled:!retiring && ordered.every(i=>cache.get(i.d.key)?.installed)};
+    lastFocus={x,z,px:player.x,pz:player.z,settled:!retiring && ordered.every(i=>cache.get(i.d.key)?.installed||failedNearby.has(i.d.key))};
   }
   return {ensureAt, update, get loaded(){return [...cache].filter(([,v])=>v.installed).map(([k])=>k);}};
 }

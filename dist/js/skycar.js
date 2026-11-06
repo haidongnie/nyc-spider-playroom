@@ -1,3 +1,4 @@
+import { loadGameAsset } from './asset-fetch.js';
 // Gregg Tavares' Cyber Web City spinner, adapted to the Manhattan scene.
 // The two local meshes were tessellated from the original NURBS surfaces.
 // Source and MIT notice: ../skycar-assets/ORIGIN.md and LICENSE-Cyber-Web-City.md.
@@ -12,13 +13,10 @@ import { createAirLanePlanner } from './air-lanes.js';
 // Decode once and share the immutable geometry between every car of the same LOD.
 async function loadSpinner(name) {
   const url = new URL(`../skycar-assets/spinner-${name}.bin.gz`, import.meta.url);
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Spinner ${name} mesh: HTTP ${response.status}`);
-  let buffer = await response.arrayBuffer();
-  const magic = new Uint8Array(buffer, 0, 2);
-  if (magic[0] === 0x1f && magic[1] === 0x8b) {
-    buffer = await new Response(new Blob([buffer]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
-  }
+  const buffer = await loadGameAsset(url, bytes => {
+    if (bytes.length < 24 || new DataView(bytes.buffer).getUint32(0, true) !== 0x31435753) throw Error('Invalid Spinner mesh.');
+    return bytes.buffer;
+  });
   const header = new Uint32Array(buffer, 0, 6);
   if (header[0] !== 0x31435753) throw new Error(`Invalid Spinner ${name} mesh`);
   const [, count, materialCount, opaqueCount, glassCount, glowCount] = header;

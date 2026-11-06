@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { build } from 'esbuild';
 import { streetZ } from '../dist/js/city-config.js';
 import {DISTRICT_SIZE, START_DISTRICT_RADIUS} from '../dist/js/district-layout.js';
@@ -140,8 +141,23 @@ const html = await readFile(indexFile, 'utf8');
 const first = html.indexOf(start), last = html.indexOf(end);
 if (first < 0 || last <= first) throw Error('Missing deployment header in index.html');
 await replaceFile(indexFile, html.slice(0, first) + header + html.slice(last + end.length));
+// GitHub can serve a previously cached index for ten minutes after a deploy.
+// Retain its two executable chunks so that an already-open tab can finish booting.
+const previousChunks = new Set();
+try {
+  const git = ['-C', path.dirname(dist.replace(/\/$/, ''))];
+  const previousHTML = execFileSync('git', [...git, 'show', 'HEAD:dist/index.html'], {encoding:'utf8', stdio:['ignore','pipe','ignore']});
+  for (const match of previousHTML.matchAll(/href="\.\/js\/built\/((?:shared|game)-[A-Z0-9]+\.js)"/g)) {
+    const name = match[1];
+    previousChunks.add(name);
+    if (!currentFiles.has(name)) {
+      const bytes = execFileSync('git', [...git,'show','HEAD:dist/js/built/'+name], {maxBuffer:12*1024*1024, stdio:['ignore','pipe','ignore']});
+      await writeFile(path.join(outDir,name), bytes);
+    }
+  }
+} catch { /* A standalone export has no prior deployed Git revision. */ }
 for (const name of existing) {
-  if (!currentFiles.has(name) && /^(?:(?:game|shared|inspection)-[A-Z0-9]+\.js|api-[A-Z0-9]+)$/.test(name)) {
+  if (!currentFiles.has(name) && !previousChunks.has(name) && /^(?:(?:game|shared|inspection)-[A-Z0-9]+\.js|api-[A-Z0-9]+)$/.test(name)) {
     await rm(path.join(outDir, name), {recursive:true, force:true});
   }
 }

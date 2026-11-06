@@ -99,7 +99,6 @@ export class SpiderSwing {
     this.viewHeading = this.person.heading;
     this.groundFacing = this.person.heading;
     this.backHeld = false;
-    this.lastGroundInputWasBack = false;
     this.groundPOV = false;
   }
   floor(x, z, limit) {
@@ -213,18 +212,17 @@ export class SpiderSwing {
     const back = !forward && backward > 0;
     if (pov !== this.groundPOV) {
       this.viewHeading = this.groundFacing = p.heading;
-      this.backHeld = this.lastGroundInputWasBack = false;
+      this.backHeld = false;
       this.groundPOV = pov;
     }
-    // Commit a freely orbited chase view as the new forward direction when
-    // reversing. Its total camera angle stays fixed while the body turns.
-    if (view?.activePresetId === 'chase' &&
-      ((back && !this.backHeld) || (forward && this.lastGroundInputWasBack))) {
+    // S keeps the chase camera in front of the turning actor.
+    if (view?.activePresetId === 'chase' && back && !this.backHeld) {
       this.viewHeading += view.orbitYawOffset;
       view.orbitYawOffset = 0;
     }
-    this.viewHeading += steer * 2.6 * dt;
-    this.groundFacing += steer * 2.6 * dt;
+    const steering = steer * 2.6 * dt;
+    this.viewHeading += steering;
+    this.groundFacing += steering;
     if (back) {
       if (pov && !this.backHeld) {
         // Sample the view once: following the turning head every frame would
@@ -240,15 +238,29 @@ export class SpiderSwing {
         const dz = view?.currentPos ? view.currentPos.z - p.position.z : 0;
         this.groundFacing = dx * dx + dz * dz > 0.01 ? Math.atan2(dx, dz) : this.viewHeading + Math.PI;
       }
-      this.lastGroundInputWasBack = true;
     } else if (forward) {
-      this.groundFacing = this.viewHeading;
-      this.lastGroundInputWasBack = false;
+      if (pov) {
+        // POV's view is body heading + mouse yaw. Transfer that offset once
+        // before turning the body, so a held W never adds it repeatedly.
+        p.heading += (view.orbitYawOffset || 0) + steering;
+        this.viewHeading = p.heading;
+        view.orbitYawOffset = 0;
+      } else {
+        // Use the actual horizontal sight line, including chase damping, a
+        // fresh orbit, or a camera clipped against a wall. The third-person
+        // camera is steered by viewHeading, independently of the actor's yaw.
+        const dx = view?.initialized ? view.currentLookAt.x - view.currentPos.x : 0;
+        const dz = view?.initialized ? view.currentLookAt.z - view.currentPos.z : 0;
+        p.heading = dx * dx + dz * dz > 0.000001
+          ? Math.atan2(dx, dz) : this.viewHeading + (view?.orbitYawOffset || 0);
+      }
+      this.groundFacing = p.heading;
     }
     this.backHeld = back;
-    const angle = this.groundFacing - p.heading;
-    p.heading += clamp(Math.atan2(Math.sin(angle), Math.cos(angle)), -12 * dt, 12 * dt);
-    // Accelerate out of the turn rather than initially running away from the camera.
+    if (!forward) {
+      const angle = this.groundFacing - p.heading;
+      p.heading += clamp(Math.atan2(Math.sin(angle), Math.cos(angle)), -12 * dt, 12 * dt);
+    }
     const target = (forward || backward * 0.65) * runSpeed * Math.max(0, Math.cos(this.groundFacing - p.heading));
     const acceleration = 18 * (runSpeed === 82 ? 10 : 1) * dt;
     this.groundSpeed += clamp(target - this.groundSpeed, -acceleration, acceleration);
@@ -278,7 +290,7 @@ export class SpiderSwing {
     } else {
       p.heading += turn * 1.45 * dt;
       this.viewHeading = this.groundFacing = p.heading;
-      this.backHeld = this.lastGroundInputWasBack = false;
+      this.backHeld = false;
     }
     const fx = Math.sin(p.heading), fz = Math.cos(p.heading);
     if (this.state === 'ground') {

@@ -307,7 +307,11 @@ class CameraSystem {
       this.userOrbitTimer = Math.max(0, this.userOrbitTimer - dt);
     }
 
-    if (!this.pointerLocked && this.mouseLookMode !== 'soft' && !this.isDragging && this.userOrbitTimer <= 0 && Math.abs(entity.speed) > 0.5) {
+    // On foot the viewed direction steers W. Preserve it while running and
+    // coasting, so automatic chase recentering cannot bend that path.
+    const input = this.controllerManager.keys;
+    const steerByView = entity.web?.state === 'ground' && (input?.forward || !input?.backward);
+    if (!steerByView && !this.pointerLocked && this.mouseLookMode !== 'soft' && !this.isDragging && this.userOrbitTimer <= 0 && Math.abs(entity.speed) > 0.5) {
       this.orbitYawOffset -= Math.round(this.orbitYawOffset / (Math.PI * 2)) * (Math.PI * 2);
       this.orbitYawOffset += (0.0 - this.orbitYawOffset) * (1 - Math.exp(-dt * 2.2));
     }
