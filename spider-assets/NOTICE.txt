@@ -1,0 +1,14 @@
+Friendly Neighborhood Spider-Man — Peter Parker character
+
+Character source: the Friendly Neighborhood Spider-Man game published by Ethan Hale on Combos.
+https://combos.game/zh-CN/play/2a99d6828ad1b1ef811fbed28df4672d
+
+Spider-Man was created by Stan Lee and Steve Ditko. Spider-Man © Marvel.
+The original game's end credits describe it as an unofficial, non-commercial fan project.
+Its credits identify Meshy for the 3D characters, Mixamo for animation, and Blender for the moves.
+
+peter.json.gz contains only the Peter Parker FBX character, its original embedded suit texture, and selected player motion clips from the local Friendly Neighborhood Spider-Man export. Source metadata and file hashes are in source.json. The conversion preserves skin weights, rig, material slots, texture coordinates and motion tracks. Walking and airborne clips are from the original game. Seated driver, pilot and pedaling poses are additions for the Manhattan game and are computed on the same rig.
+
+civilian.glb is the user-provided file “human figure 3d model.glb”. Its original Tripo mesh, material, embedded texture, 65-joint rig, look_around.001 and run.001 animations are stored verbatim. Runtime playback removes the run’s horizontal travel because the city controller handles position. The seated vehicle poses are produced on the GLB’s own rig.
+
+GLTFLoader.js and SkeletonUtils.js are from three.js 0.187.0 and distributed with LICENSE-three.txt. Their MIT license covers those utilities only.

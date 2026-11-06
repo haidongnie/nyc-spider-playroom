@@ -1,0 +1,33 @@
+.room-style-row {
+  position:absolute; top:calc(100% + 8px); right:0; display:flex; gap:6px; pointer-events:auto;
+}
+.room-style-row .visual-style, body.touch-enabled .room-style-row .visual-style {position:static;}
+.room-button {color:var(--text);display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:0 11px;min-height:38px;border-radius:11px;font-size:12px;font-weight:650;white-space:nowrap;}
+.room-button[data-online="true"] {color:var(--taxi);}
+body.hud-minimized .room-style-row {display:none;}
+#room-panel {width:min(334px,calc(100vw - 24px));padding:20px;color:#f2f0eb;background:#1b2027;border:1px solid #58616c;border-radius:17px;box-shadow:0 16px 64px #0008;max-height:calc(100dvh - 24px);overflow-y:auto;}
+#room-panel::backdrop {background:#10182180;}
+#room-panel header {display:flex;align-items:center;justify-content:space-between;margin-bottom:15px;}
+#room-panel h2 {font-size:21px;font-weight:650;letter-spacing:.01em;margin:0;}
+#room-panel label {display:block;font-size:13px;color:#c8ced4;margin:12px 0 5px;}
+#room-panel input {width:100%;min-height:40px;background:#12171d;border:1px solid #525b66;border-radius:8px;padding:7px 10px;color:white;font:inherit;font-size:15px;}
+#room-panel input:focus-visible,#room-panel button:focus-visible {outline:2px solid #ffd054;outline-offset:2px;}
+#room-code-input {text-transform:uppercase;}
+#room-panel button {background:#313942;color:#f4f4f3;border-radius:8px;min-height:40px;padding:6px 12px;font-weight:600;cursor:pointer;}
+#room-panel #room-close {font-size:23px;line-height:24px;min-width:34px;min-height:34px;padding:0 8px;background:transparent;}
+#room-panel .room-primary {width:100%;background:#f5c645;color:#201c13;margin-top:12px;}
+#room-panel button:disabled {opacity:.5;cursor:wait;}
+#room-panel .room-join-row {display:grid;grid-template-columns:1fr auto;gap:7px;}
+#room-panel [hidden] {display:none;}
+#room-status {font-size:12px;color:#cad2db;margin:16px 0 0;line-height:1.5;}
+.room-code-line {display:flex;align-items:baseline;justify-content:space-between;margin:0 0 4px;}
+#room-code-value {font-size:27px;letter-spacing:.13em;color:#ffd054;}
+#room-players {padding:0;margin:13px 0;list-style:none;max-height:min(24dvh,180px);overflow:auto;}
+#room-players li {padding:4px 0;font-size:14px;}
+#room-leave {width:100%;}
+#room-manual-link {margin-top:7px;}
+body.touch-enabled .room-style-row {position:fixed;top:calc(max(var(--edge),env(safe-area-inset-top)) + 66px);right:auto;left:max(var(--edge),env(safe-area-inset-left));}
+body.touch-enabled .room-button {min-height:44px;}
+@media(max-width:820px){body.touch-enabled .room-style-row {top:calc(max(var(--edge),env(safe-area-inset-top)) + 122px);}}
+@media(max-width:820px) and (max-height:500px){body.touch-enabled .room-style-row {top:calc(max(var(--edge),env(safe-area-inset-top)) + 62px);left:calc(max(var(--edge),env(safe-area-inset-left)) + 56px);}}
+@media(max-width:360px){body.touch-enabled .room-style-row {top:calc(max(var(--edge),env(safe-area-inset-top)) + 60px);}}

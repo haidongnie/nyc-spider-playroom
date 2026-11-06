@@ -1,0 +1,53 @@
+{
+  "title": "Friendly Neighborhood Spider-Man",
+  "character": "Peter Parker / Spider-Man",
+  "publisher": "Ethan Hale (Combos)",
+  "projectPage": "https://combos.game/zh-CN/play/2a99d6828ad1b1ef811fbed28df4672d",
+  "originalCredits": {
+    "character": "Marvel",
+    "creators": "Stan Lee and Steve Ditko",
+    "models": "Meshy",
+    "animation": "Mixamo",
+    "moves": "Blender"
+  },
+  "sourceSHA256": {
+    "hero.fbx": "6069662462398eb33ac6f28039f86c6a544f4af45fe04f42807779a118fb9b46",
+    "ground-animations.json": "2a865af4964fdaf63eefa0dd0023c52bcab09ff9a0a7a505fc5a922dda246492",
+    "air-animations.json": "c845ab49b8e76ef52ac996454c3ceacc6f4eae03eb89f776537a5630c31f73b6",
+    "moves-animations.json": "823be62e1c2f544d98882c5adb9d07f10b2424c7ffea6f7510a8b1f51fe7dfd3",
+    "walk-animations.json": "e196caf3d9961127a2295014aa7f8a75caa2a166149d6c166b64dc18045e6017",
+    "webshoot-animations.json": "a3639c512b2c7a3778d7aa9283995b420a1293f9b779661cb1d829bfb2370896"
+  },
+  "includedAnimations": [
+    "idle",
+    "run",
+    "jump",
+    "swing",
+    "fall",
+    "wallcrawl",
+    "sprint",
+    "takeoff",
+    "hardland",
+    "swingPullR",
+    "swingPullL",
+    "swingReachR",
+    "swingReachL",
+    "glide",
+    "walk",
+    "webshootR",
+    "webshootL",
+    "webshootB",
+    "webshootAir"
+  ],
+  "packSHA256": "739bb5ee806efb1c19ec6a83d5272d78a5507b5c8812e996524b9fd3ce166f83",
+  "civilian": {
+    "originalFileName": "human figure 3d model.glb",
+    "source": "User-provided local file",
+    "generator": "Tripo",
+    "sha256": "a4ea8a7512ee72025b6f7c59ecc41242fd1c0cedff45542d7d3fd12fa01bf75f",
+    "embeddedClips": [
+      "look_around.001",
+      "run.001"
+    ]
+  }
+}
