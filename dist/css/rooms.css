@@ -23,7 +23,9 @@ body.hud-minimized .room-style-row {display:none;}
 .room-code-line {display:flex;align-items:baseline;justify-content:space-between;margin:0 0 4px;}
 #room-code-value {font-size:27px;letter-spacing:.13em;color:#ffd054;}
 #room-players {padding:0;margin:13px 0;list-style:none;max-height:min(24dvh,180px);overflow:auto;}
-#room-players li {padding:4px 0;font-size:14px;}
+#room-players li {display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0;font-size:14px;}
+#room-players li span {overflow-wrap:anywhere;}
+#room-panel #room-players button {min-height:32px;flex-shrink:0;padding:4px 9px;font-size:12px;}
 #room-leave {width:100%;}
 #room-manual-link {margin-top:7px;}
 body.touch-enabled .room-style-row {position:fixed;top:calc(max(var(--edge),env(safe-area-inset-top)) + 66px);right:auto;left:max(var(--edge),env(safe-area-inset-left));}

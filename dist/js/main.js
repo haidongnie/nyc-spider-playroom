@@ -766,7 +766,13 @@ async function initApp() {
   await showLoadingStage('Preparing shadows and the first frame...', 'warmup');
 
   const multiplayer = createMultiplayer({
-    scene, controllerManager, trafficSystem, highwayTraffic, airTraffic, hijack,
+    scene, controllerManager, trafficSystem, highwayTraffic, airTraffic, hijack, selectMode,
+    onRendezvous: () => {
+      touchControls.reset();
+      gamepadControls.reset();
+      cameraSystem.resetForTeleport();
+      selectCamera('chase', true);
+    },
     getDay: () => lightingSystem.activePresetId, changeDay: selectTime
   });
 
