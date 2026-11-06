@@ -686,6 +686,7 @@ class NYCMapSystem {
 
   toggleFullMap(open) {
     this.isFullMapOpen = Boolean(open);
+    if (this.isFullMapOpen) this.cameraSystem?.releaseMouse?.();
     if (!this.isFullMapOpen) this.cancelPan();
     if (this.onToggle) this.onToggle(this.isFullMapOpen);
     if (!this.modal) return;

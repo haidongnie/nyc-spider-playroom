@@ -1458,7 +1458,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, signalIntersections) {
     a.prevX = prevX; a.prevZ = prevZ;
     a.sin = Math.sin(heading); a.cos = Math.cos(heading);
     a.halfW = player.halfW; a.halfL = player.halfL;
-    a.mass = pe.type === 'car' ? 1700 : pe.type === 'cyclist' ? 95 : 80;
+    a.mass = pe.type === 'car' ? pe.streetDimensions?.mass ?? 1700 : pe.type === 'cyclist' ? 95 : 80;
     a.vx = a.sin * (pe.speed || 0) + (pe.vx || 0);
     a.vz = a.cos * (pe.speed || 0) + (pe.vz || 0);
     a.angularVel = pe.type === 'car' ? pe.angularVel || 0 : 0;
@@ -1904,7 +1904,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, signalIntersections) {
       for (const e of edges) { for (const occ of e.occ) occ.length=0; e.through=e.lefts=0; }
       for (const n of nodes) { n.box.fill(0); n.crossing.fill(0); }
       for (let i=0;i<vehicles.length;i++) {
-        const v=vehicles[i], r=shared.cars[i], e=r&&edges[r.edge-1];
+        const v=vehicles[i], r=shared.cars[i], e=!v.hijacked&&r&&edges[r.edge-1];
         v.claimed=false;
         if (!e) {v.edge=null;v.conn=null;continue;}
         const lane=Math.min(r.lane,e.lanes.length-1);
@@ -1945,8 +1945,8 @@ function createTrafficSystem(scene, sidewalks, obstacles, signalIntersections) {
       player.vx = player.fx * speed + (playerEntity.vx || 0);
       player.vz = player.fz * speed + (playerEntity.vz || 0);
     }
-    player.halfW = activeMode === 'cyclist' ? 0.35 : activeMode === 'person' ? 0.32 : 0.86;
-    player.halfL = activeMode === 'cyclist' ? 0.85 : activeMode === 'person' ? 0.32 : 2.18;
+    player.halfW = activeMode === 'cyclist' ? 0.35 : activeMode === 'person' ? 0.32 : playerEntity?.streetDimensions?.halfWidth ?? 0.86;
+    player.halfL = activeMode === 'cyclist' ? 0.85 : activeMode === 'person' ? 0.32 : playerEntity?.streetDimensions?.halfL ?? 2.18;
 
     // 1. Cars & buses
     // Limit attempted placements, not just successes, and rotate through the pool so an awkward location
@@ -1956,6 +1956,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, signalIntersections) {
       const area=districts[vehicleCursor % (districts.length+1)-1];
       const v = vehicles[vehicleCursor];
       vehicleCursor = (vehicleCursor + 1) % vehicles.length;
+      if (v.hijacked) continue;
       const d = v.edge ? Math.hypot(v.x - (area?.x ?? focusX), v.z - (area?.z ?? focusZ)) : Infinity;
       if (d <= (jump ? NEAR_RADIUS : VEHICLE_RADIUS)) continue;
       budget--;
@@ -1973,7 +1974,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, signalIntersections) {
     for (let i = 0; i < vehicles.length; i++) {
       const v = vehicles[i];
       if (shared) {
-        const r=shared.cars[i];
+        const r=!v.hijacked&&shared.cars[i];
         v.edge=r?edges[r.edge-1]:null;
         if (!v.edge) continue;
         v.prevX=v.x;v.prevZ=v.z;v.x=r.x;v.z=r.z;v.yaw=r.yaw;v.yawOffset=0;
@@ -2059,9 +2060,36 @@ function createTrafficSystem(scene, sidewalks, obstacles, signalIntersections) {
     updateSparks(dt);
   }
 
+  // Keep the stable fleet slot, but take it out of lane occupancy, collision,
+  // headlight and instance pools while a player drives its actual model.
+  function holdStreetCar(slot, taken, drop = null) {
+    const v = cars[slot];
+    if (!v || Boolean(v.hijacked) === taken) return;
+    v.hijacked = taken;
+    v.edge = v.conn = v.commit = v.trail = null;
+    v.speed = 0;
+    if (taken || !drop || ![drop.x,drop.z,drop.heading].every(Number.isFinite)) return;
+    // On exit hand it back to the same pool on the closest compatible lane.
+    // A car abandoned off-road is replenished elsewhere via the ordinary AI.
+    let best = null, score = Infinity;
+    for (const e of edges) {
+      const along = (drop.x-e.sx)*e.dx + (drop.z-e.sz)*e.dz;
+      if (along < v.half || along > e.len-v.half) continue;
+      for (let lane=0; lane<e.lanes.length; lane++) {
+        const lateral = e.lanes[lane], x=e.sx+along*e.dx+e.rx*lateral, z=e.sz+along*e.dz+e.rz*lateral;
+        const d = Math.hypot(x-drop.x,z-drop.z);
+        if (d>4 || !laneClear(e.occ[lane],along,v.half+.7)) continue;
+        const cost=d+2*(1-Math.cos(Math.atan2(e.dx,e.dz)-drop.heading));
+        if(cost<score){score=cost;best={e,lane,s:along};}
+      }
+    }
+    if (best) {place(v,best.e,best.lane,best.s);v.speed=0;}
+  }
+
   return {
     group,
     update,
+    holdStreetCar,
     setCollisionListener,
     setSharedState,
     setSharedInterests,

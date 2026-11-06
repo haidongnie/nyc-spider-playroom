@@ -1,3 +1,4 @@
+import { applyStreetCarSkin } from './hijack.js';
 // Remote peers are render-only. Their snapshots never feed the local controller,
 // collision system, audio, save data, or persistent parked player vehicles.
 import * as THREE from 'three/webgpu';
@@ -25,7 +26,7 @@ function normalize(raw, time) {
   const p = point(raw.pos ?? raw.position ?? raw);
   if (!p) return null;
   const speed = clamp(numeric(raw.speed),-150,150);
-  return {time,mode:raw.mode,p,heading:wrap(numeric(raw.heading)),pitch:clamp(numeric(raw.pitch),-1.3,1.3),
+  return {time,mode:raw.mode,street:Number.isInteger(raw.street)?raw.street:-1,p,heading:wrap(numeric(raw.heading)),pitch:clamp(numeric(raw.pitch),-1.3,1.3),
     roll:clamp(numeric(raw.roll),-1.3,1.3),speed,
     pose:POSES.has(raw.pose)?raw.pose:Math.abs(speed)>3?'run':Math.abs(speed)>0.25?'walk':'idle',
     phase:Number.isFinite(raw.phase)?wrap(raw.phase):null, side:raw.side==='left'?'left':'right',
@@ -38,7 +39,7 @@ function displayState(queue, time, output) {
   const span=b.time-a.time;
   const t=span>0?clamp((time-a.time)/span,0,1):0;
   const sample=t>=1?b:a;
-  output.mode=sample.mode;output.pose=sample.pose;output.suited=sample.suited;output.suitProgress=sample.suitProgress;
+  output.mode=sample.mode;output.street=sample.street;output.pose=sample.pose;output.suited=sample.suited;output.suitProgress=sample.suitProgress;
   output.side=sample.side;output.web=sample.web;output.name=sample.name;
   output.x=THREE.MathUtils.lerp(a.p[0],b.p[0],t);output.y=THREE.MathUtils.lerp(a.p[1],b.p[1],t);output.z=THREE.MathUtils.lerp(a.p[2],b.p[2],t);
   output.heading=a.heading+wrap(b.heading-a.heading)*t;
@@ -76,7 +77,7 @@ const badgeColors=['#ffca54','#7cd9ef','#d99af5','#84dfaa','#ff9c78','#a6b6ff'];
 // Retain only static geometry, shared materials and the original vehicle pivots.
 // In particular, a source vehicle might currently contain the entire *local* avatar.
 function cloneVehicleTree(source, avatarRoot, mapping) {
-  if (source===avatarRoot || source.isLight || source.isCamera || source.isSkinnedMesh) return null;
+  if (source.userData.seasideOutline || source.name==='StreetCarPoliceBar' || source===avatarRoot || source.isLight || source.isCamera || source.isSkinnedMesh) return null;
   const copy=source.clone(false);mapping.set(source,copy);
   copy.castShadow=false;
   for(const child of source.children) {
@@ -100,7 +101,11 @@ function makeVehicle(mode, entities, style) {
   root.position.set(0,0,0);root.rotation.set(0,0,0);root.visible=true;
   const pivot=mapping.get(src.chassisPivot || src.leanPivot || src.tiltPivot) || root;
   pivot.position.y=0;pivot.rotation.set(0,0,0);
-  if(mode==='car')return {root,pivot,wheels:src.wheels.map(w=>({tire:mapping.get(w.tire),steer:mapping.get(w.steerPivot),front:w.isFront}))};
+  if(mode==='car'){
+    const wheels=src.wheels.map(w=>({tire:mapping.get(w.tire),steer:mapping.get(w.steerPivot),steerPivot:mapping.get(w.steerPivot),front:w.isFront,isFront:w.isFront}));
+    const v={root,pivot,chassisPivot:pivot,wheels};
+    applyStreetCarSkin(v,null,-1,src);return v;
+  }
   if(mode==='cyclist')return {root,pivot,wheels:[mapping.get(src.frontWheel),mapping.get(src.rearWheel)],crank:mapping.get(src.crankPivot),pedals:src.pedals.map(p=>mapping.get(p))};
   return {root,pivot,main:mapping.get(src.mainRotorPivot),tail:mapping.get(src.tailRotorPivot)};
 }
@@ -136,7 +141,7 @@ function releaseAvatar(avatar) {
 
 // Snapshots are world-space {mode,x,y,z,heading,pitch,roll,speed,pose,phase,side,
 // suited,suitProgress,web:[x,y,z]|null,name}. Input angles are radians.
-export function createRemotePlayers({scene,controllerManager,showNames=true}) {
+export function createRemotePlayers({scene,controllerManager,showNames=true,streetCars=[]}) {
   const group=new THREE.Group();group.name='RemotePlayers';scene.add(group);
   const peers=new Map(), entities=controllerManager.entities;
   const wireGeo=new THREE.CylinderGeometry(1,1,1,5);
@@ -232,6 +237,7 @@ export function createRemotePlayers({scene,controllerManager,showNames=true}) {
       syncMode(peer,s);
       const turn=peer.yaw===null||!dt?0:wrap(s.heading-peer.yaw)/dt;peer.yaw=s.heading;
       const v=peer.vehicles.get(peer.mode);
+      if(v && peer.mode==='car')applyStreetCarSkin(v,streetCars[s.street],s.street);
       animateVehicle(v,peer.mode,s,dt,peer,turn);
       const detailed=dist<(s.mode==='person'?215:125);
       peer.marker.visible=s.mode==='person'&&!detailed;
@@ -272,6 +278,7 @@ export function createRemotePlayers({scene,controllerManager,showNames=true}) {
     const p=peers.get(id);if(!p)return;
     if(p.tag){p.tag.material.map.dispose();p.tag.material.dispose();}
     if(p.avatar)releaseAvatar(p.avatar);
+    const vehicle=p.vehicles.get('car');if(vehicle)applyStreetCarSkin(vehicle,null,-1);
     p.root.removeFromParent();p.wire.removeFromParent();peers.delete(id);
   }
   function clear(){for(const id of [...peers.keys()])remove(id);}

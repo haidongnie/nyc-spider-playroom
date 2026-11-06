@@ -34,6 +34,8 @@ class CameraSystem {
     this.orbitPitchOffset = 0.09;
     this.zoomMultiplier = 1.0;
     this.isDragging = false;
+    this.pointerLocked = false;
+    this.mouseLookMode = '';
     this.userOrbitTimer = 0;
 
     this.currentPos = new THREE.Vector3(0, 10, 380);
@@ -57,9 +59,80 @@ class CameraSystem {
     const canvas = this.domElement;
     const pointers = new Map();
     canvas.style.touchAction = 'none';
+    canvas.tabIndex = 0;
+    canvas.setAttribute?.('aria-label', 'Game viewport');
+    let lockRequested = false;
+    let mousePress = null;
+    let soft = null;
+    const insideSoftBounds = (x, y, bounds) => x > bounds.left + 2 && x < bounds.right - 2
+      && y > bounds.top + 2 && y < bounds.bottom - 2 && x > 2 && y > 2
+      && x < window.innerWidth - 2 && y < window.innerHeight - 2;
+
+    this._updateMouseMode = () => {
+      const mode = !this.acceptsMouseLook() ? 'fixed' : this.pointerLocked ? 'locked'
+        : soft ? 'soft' : this.isDragging && mousePress?.moved ? 'drag' : 'click';
+      if (mode === this.mouseLookMode) return;
+      this.mouseLookMode = mode;
+      canvas.style.cursor = mode === 'soft' ? 'none' : '';
+      canvas.title = {click:'Click for mouse look, or drag to orbit · Esc to release',
+        locked:'Esc to release the mouse', soft:'Esc to release · Move to the edge to show the cursor',
+        drag:'Release the mouse button to end the drag', fixed:''}[mode];
+      window.dispatchEvent?.(new CustomEvent('mouse-look-change', {detail: mode}));
+    };
+    this._updateMouseMode();
+
+    this.releaseMouse = () => {
+      lockRequested = false;
+      mousePress = null;
+      if (soft) this.controllerManager.resetInput?.();
+      soft = null;
+      this._clearPointers();
+      this._updateMouseMode();
+      if (document.pointerLockElement === canvas) document.exitPointerLock();
+    };
+    const denied = () => {
+      if (!lockRequested || document.pointerLockElement === canvas) return;
+      lockRequested = false;
+      this._updateMouseMode();
+    };
+    document.addEventListener('pointerlockerror', denied);
+    document.addEventListener('pointerlockchange', () => {
+      const locked = document.pointerLockElement === canvas;
+      if (locked && !lockRequested) { this.releaseMouse(); return; }
+      if (locked) soft = null;
+      if (!locked && this.pointerLocked) this.controllerManager.resetInput?.();
+      lockRequested = locked;
+      this.pointerLocked = locked;
+      this._clearPointers();
+      this._updateMouseMode();
+    });
+    document.addEventListener('mousemove', (event) => {
+      if (!this.pointerLocked || !this.acceptsMouseLook()) return;
+      const dx = Math.max(-180, Math.min(180, event.movementX || 0));
+      const dy = Math.max(-180, Math.min(180, event.movementY || 0));
+      this.turnMouse(dx * 0.0032, dy * 0.0028);
+      this.userOrbitTimer = 4;
+    });
+    window.addEventListener('keydown', (event) => {
+      if ((event.key === 'Escape' || event.key === 'Tab') && (lockRequested || this.pointerLocked || soft)) this.releaseMouse();
+    }, true);
+    document.addEventListener('focusin', (event) => {
+      if (event.target !== canvas && (lockRequested || this.pointerLocked || soft)) this.releaseMouse();
+    });
+    document.addEventListener('beforetoggle', (event) => {
+      if (event.newState === 'open' && (lockRequested || this.pointerLocked || soft)) this.releaseMouse();
+    }, true);
 
     canvas.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0 || pointers.size >= 2) return;
+      if (e.button !== 0 || pointers.size >= 2 || this.pointerLocked) return;
+      mousePress = null;
+      if (e.pointerType === 'mouse') {
+        canvas.focus?.({preventScroll: true});
+        if (!this.acceptsMouseLook() || soft) return;
+        mousePress = {x:e.clientX, y:e.clientY, moved:false};
+      } else if (soft) {
+        this.releaseMouse();
+      }
       // Only two touch pointers may share a gesture; mouse and pen drags stay independent.
       if (pointers.size && (e.pointerType !== 'touch' || pointers.values().next().value.type !== 'touch')) return;
       e.preventDefault();
@@ -67,12 +140,47 @@ class CameraSystem {
       canvas.setPointerCapture(e.pointerId);
       this.isDragging = true;
       this.userOrbitTimer = 4.0;
+      // A held drag stays usable while the browser negotiates native lock.
+      if (e.pointerType === 'mouse' && this.acceptsMouseLook() && canvas.requestPointerLock && !lockRequested) {
+        lockRequested = true;
+        try { canvas.requestPointerLock()?.catch(denied); } catch { denied(); }
+      }
+    });
+
+    // Sandboxed frames often forbid native lock. A click enables bounded look,
+    // while a deliberate drag remains a one-gesture orbit. The OS cursor stays
+    // free to cross onto a HUD control or out of the frame.
+    canvas.addEventListener('click', (e) => {
+      const press = mousePress;
+      mousePress = null;
+      if (!press || press.moved || !e.detail || !this.acceptsMouseLook() || this.pointerLocked
+        || document.pointerLockElement === canvas || document.elementFromPoint(e.clientX, e.clientY) !== canvas) return;
+      const bounds = canvas.getBoundingClientRect();
+      if (!insideSoftBounds(e.clientX, e.clientY, bounds)) return;
+      soft = {x:e.clientX, y:e.clientY, bounds};
+      this._updateMouseMode();
+    });
+    canvas.addEventListener('pointerleave', (e) => {
+      if (soft && e.pointerType === 'mouse') this.releaseMouse();
     });
 
     canvas.addEventListener('pointermove', (e) => {
+      if (soft && e.pointerType === 'mouse') {
+        if (!insideSoftBounds(e.clientX, e.clientY, soft.bounds)) { this.releaseMouse(); return; }
+        this.turnMouse((e.clientX - soft.x) * 0.0032, (e.clientY - soft.y) * 0.0028);
+        soft.x = e.clientX;
+        soft.y = e.clientY;
+        this.userOrbitTimer = 4;
+        return;
+      }
       const pointer = pointers.get(e.pointerId);
-      if (!pointer) return;
+      if (!pointer || this.pointerLocked) return;
       e.preventDefault();
+      if (e.pointerType === 'mouse' && mousePress && !mousePress.moved
+        && Math.hypot(e.clientX - mousePress.x, e.clientY - mousePress.y) > 4) {
+        mousePress.moved = true;
+        this._updateMouseMode();
+      }
       const dx = e.clientX - pointer.x;
       const dy = e.clientY - pointer.y;
       const pair = pointers.size === 2 ? [...pointers.values()] : null;
@@ -86,8 +194,7 @@ class CameraSystem {
           this.zoomMultiplier = Math.max(0.45, Math.min(2.4, this.zoomMultiplier * previousDistance / distance));
         }
       } else {
-        this.orbitYawOffset -= dx * 0.0065;
-        this.orbitPitchOffset = Math.max(-0.32, Math.min(0.68, this.orbitPitchOffset + dy * 0.005));
+        this.turnMouse(dx * 0.0065, dy * 0.005);
       }
       this.userOrbitTimer = 4.0;
     });
@@ -95,6 +202,7 @@ class CameraSystem {
     const releasePointer = (id) => {
       if (!pointers.delete(id)) return;
       this.isDragging = pointers.size > 0;
+      this._updateMouseMode();
       if (canvas.hasPointerCapture(id)) canvas.releasePointerCapture(id);
     };
     for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
@@ -104,10 +212,11 @@ class CameraSystem {
       for (const id of pointers.keys()) releasePointer(id);
     };
     this._clearPointers = clearPointers;
-    window.addEventListener('blur', clearPointers);
+    window.addEventListener('blur', this.releaseMouse);
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) clearPointers();
+      if (document.hidden) this.releaseMouse();
     });
+    window.addEventListener('resize', () => { if (soft) this.releaseMouse(); });
 
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
@@ -115,10 +224,24 @@ class CameraSystem {
     }, { passive: false });
   }
 
+  turnMouse(yaw, pitch) {
+    const cockpit = this.activePresetId === 'pov';
+    this.orbitYawOffset -= yaw;
+    this.orbitPitchOffset = Math.max(cockpit ? -1.28 : -0.32,
+      Math.min(cockpit ? 1.46 : 0.68, this.orbitPitchOffset + pitch));
+  }
+
+  acceptsMouseLook() {
+    return this.activePresetId === 'chase' || this.activePresetId === 'pov';
+  }
+
   setCameraPreset(presetId, snapImmediately = false) {
     const preset = CAMERA_PRESETS.find((p) => p.id === presetId);
     if (!preset) return;
     this.activePresetId = preset.id;
+    if (!this.acceptsMouseLook()) this.releaseMouse();
+    if (preset.id !== 'pov') this.orbitPitchOffset = Math.max(-0.32, Math.min(0.68, this.orbitPitchOffset));
+    this._updateMouseMode();
     this.camera.fov = preset.fov;
     this.camera.updateProjectionMatrix();
     if (snapImmediately) {
@@ -184,7 +307,7 @@ class CameraSystem {
       this.userOrbitTimer = Math.max(0, this.userOrbitTimer - dt);
     }
 
-    if (!this.isDragging && this.userOrbitTimer <= 0 && Math.abs(entity.speed) > 0.5) {
+    if (!this.pointerLocked && this.mouseLookMode !== 'soft' && !this.isDragging && this.userOrbitTimer <= 0 && Math.abs(entity.speed) > 0.5) {
       this.orbitYawOffset -= Math.round(this.orbitYawOffset / (Math.PI * 2)) * (Math.PI * 2);
       this.orbitYawOffset += (0.0 - this.orbitYawOffset) * (1 - Math.exp(-dt * 2.2));
     }
@@ -194,14 +317,17 @@ class CameraSystem {
     this.smoothedSpeed += (Math.abs(entity.speed) - this.smoothedSpeed) * (1 - Math.exp(-dt * 3.0));
     const speedLag = this.smoothedSpeed * 0.1;
 
-    let travelYaw = entity.heading;
+    // On foot, S turns the actor toward the lens without dragging the
+    // third-person camera around behind the actor again.
+    const groundViewYaw = entity.web?.state === 'ground' ? entity.web.viewHeading : entity.heading;
+    let travelYaw = groundViewYaw;
     const swinging = entity.web && entity.web.state !== 'ground';
     if (swinging && this.smoothedSpeed > 5) {
       const v = entity.web.velocity;
       const drift = Math.atan2(v.x,v.z) - travelYaw;
       travelYaw += THREE.MathUtils.clamp(Math.atan2(Math.sin(drift),Math.cos(drift)),-.65,.65) * .65;
     }
-    const totalYaw = travelYaw + this.orbitYawOffset;
+    const totalYaw = (this.activePresetId === 'pov' ? entity.heading : travelYaw) + this.orbitYawOffset;
 
     switch (this.activePresetId) {
       case 'chase': {
@@ -236,14 +362,14 @@ class CameraSystem {
         const lowY = entity.type === 'helicopter' ? entity.position.y + 1.2 : entity.position.y + 0.92;
 
         desiredPos.set(
-          entity.position.x - Math.sin(entity.heading) * backDist + Math.cos(entity.heading) * sideOffset,
+          entity.position.x - Math.sin(groundViewYaw) * backDist + Math.cos(groundViewYaw) * sideOffset,
           Math.max(0.55, lowY),
-          entity.position.z - Math.cos(entity.heading) * backDist - Math.sin(entity.heading) * sideOffset
+          entity.position.z - Math.cos(groundViewYaw) * backDist - Math.sin(groundViewYaw) * sideOffset
         );
         desiredLook.set(
-          entity.position.x + Math.sin(entity.heading) * 3.2,
+          entity.position.x + Math.sin(groundViewYaw) * 3.2,
           entity.position.y + 1.05,
-          entity.position.z + Math.cos(entity.heading) * 3.2
+          entity.position.z + Math.cos(groundViewYaw) * 3.2
         );
         break;
       }
@@ -280,11 +406,9 @@ class CameraSystem {
           entity.position.y + eyeY,
           entity.position.z + Math.cos(entity.heading) * fwdOffset
         );
-        desiredLook.set(
-          entity.position.x + Math.sin(totalYaw) * 40.0,
-          entity.position.y + eyeY + Math.sin(-this.orbitPitchOffset) * 18.0 + 1.5,
-          entity.position.z + Math.cos(totalYaw) * 40.0
-        );
+        const lookPitch = 0.09 - this.orbitPitchOffset;
+        desiredLook.set(Math.sin(totalYaw) * Math.cos(lookPitch), Math.sin(lookPitch),
+          Math.cos(totalYaw) * Math.cos(lookPitch)).multiplyScalar(40).add(desiredPos);
         break;
       }
 

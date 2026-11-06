@@ -93,7 +93,7 @@ function landmarkBodies(scene) {
 }
 
 export function createSeasideOutlines({scene, camera, controllerManager, airTraffic}) {
-  const material=shellMaterial(), geometries=new WeakMap(), shells=new WeakMap();
+  const material=shellMaterial(), geometries=new WeakMap(), shells=new WeakMap(), sourceGeometry=new WeakMap();
   const fixed = landmarkBodies(scene), player = new Map();
   const taxi=controllerManager?.entities.car, spinner=controllerManager?.entities.skycar;
   if(taxi) {
@@ -122,9 +122,11 @@ export function createSeasideOutlines({scene, camera, controllerManager, airTraf
 
   function getShell(mesh) {
     let shell=shells.get(mesh);
-    if(shell) return shell;
+    if(shell && sourceGeometry.get(mesh)===mesh.geometry) return shell;
     let geometry=geometries.get(mesh.geometry);
     if(!geometry) { geometry=shellGeometry(mesh.geometry); geometries.set(mesh.geometry,geometry); }
+    sourceGeometry.set(mesh,mesh.geometry);
+    if(shell){shell.geometry=geometry;return shell;} // A driven traffic car can replace the taxi body and wheels.
     shell=new THREE.Mesh(geometry,material);
     shell.name=`${mesh.name || 'Landmark'} · Seaside ink`;
     shell.userData.seasideOutline=true;

@@ -1,3 +1,4 @@
+import { createHijack } from './hijack.js';
 import { createMultiplayer } from './multiplayer.js';
 import * as THREE from 'three/webgpu';
 import { pass, mrt, output, normalView, positionView, metalness, roughness, vec2, smoothstep } from 'three/tsl';
@@ -151,10 +152,12 @@ async function initApp() {
   // 4. Initialize player vehicles and the camera system
   await showLoadingStage('Preparing player, vehicles and controls...', 'controllers');
   const controllerManager = new ThirdPersonControllerManager(scene, allColliders);
+  let hijack, savedStreetCar=null;
   // Reuse teleport placement so saved players return at rest, close to their last positions.
   try {
     const saved = JSON.parse(localStorage.getItem('nyc-player-state'));
     if (saved?.version === 1 || saved?.version === 2) {
+      savedStreetCar=saved.hijack;
       for (const mode of Object.keys(controllerManager.entities)) {
         const p = saved.entities?.[mode];
         if (!p || ![p.x, p.y, p.z, p.heading].every(Number.isFinite)) continue;
@@ -173,7 +176,7 @@ async function initApp() {
         .map(([mode, entity]) => [mode, {
           x: entity.position.x, y: entity.position.y, z: entity.position.z, heading: entity.heading
         }]));
-      localStorage.setItem('nyc-player-state', JSON.stringify({ version: 2, activeMode: controllerManager.activeMode, spiderSuited: controllerManager.spiderSuited, entities }));
+      localStorage.setItem('nyc-player-state', JSON.stringify({ version: 2, activeMode: controllerManager.activeMode, spiderSuited: controllerManager.spiderSuited, hijack:hijack?.save(), entities }));
     } catch { /* Storage may be disabled or full. */ }
   }
 
@@ -318,19 +321,28 @@ async function initApp() {
 
   // Keyboard guide for each mode: [keys, action]
   const controlHints = {
-    person: [[['W', 'S'], 'Move'], [['A', 'D'], 'Turn'], [['Space'], 'Jump']],
-    car: [[['W', 'S'], 'Drive / Reverse'], [['A', 'D'], 'Steer'], [['B'], 'Horn'], [['Drag'], 'Orbit']],
-    cyclist: [[['W', 'S'], 'Pedal / Brake'], [['A', 'D'], 'Lean & Turn'], [['Drag'], 'Orbit']],
-    helicopter: [[['W', 'S'], 'Pitch'], [['A', 'D'], 'Yaw'], [['Space', 'E'], 'Ascend'], [['Q', 'C'], 'Descend']],
-    skycar: [[['W', 'S'], 'Throttle / Brake'], [['A', 'D'], 'Steer'], [['Space', 'E'], 'Ascend'], [['Q', 'C'], 'Descend']]
+    person: [[['W', 'S'], 'Run / Turn back'], [['A', 'D'], 'Turn'], [['Space'], 'Jump'], [['E'], 'Take nearby car']],
+    car: [[['W', 'S'], 'Drive / Reverse'], [['A', 'D'], 'Steer'], [['B'], 'Horn'], [['E'], 'Exit when slow']],
+    cyclist: [[['W', 'S'], 'Pedal / Brake'], [['A', 'D'], 'Lean & Turn']],
+    helicopter: [[['W', 'S'], 'Pitch'], [['A', 'D'], 'Yaw'], [['Space'], 'Ascend'], [['Q', 'C'], 'Descend']],
+    skycar: [[['W', 'S'], 'Throttle / Brake'], [['A', 'D'], 'Steer'], [['Space'], 'Ascend'], [['Q', 'C'], 'Descend']]
   };
   // Top speeds in mph set the full scale of the speed meter.
   const topSpeedMph = { person: 18, car: 81, cyclist: 43, helicopter: 116, skycar: 179 };
 
+  const chineseHints = /^zh(?:-|$)/i.test(navigator.language) ? {
+    'Run / Turn back':'向前跑 / 回头跑', Turn:'转向', Jump:'跳跃', 'Take nearby car':'靠近车门劫车',
+    'Hold to swing':'按住射丝摆荡', 'Drive / Reverse':'前进 / 倒车', Steer:'转向', Horn:'鸣笛',
+    'Exit when slow':'减速后下车', 'Pedal / Brake':'骑行 / 刹车', 'Lean & Turn':'倾身转向',
+    Pitch:'俯仰', Yaw:'转向', Ascend:'上升', Descend:'下降', 'Throttle / Brake':'加速 / 减速',
+    'Mouse look':'点击街景控制视角', 'Free cursor':'释放鼠标', 'Look':'环顾'
+  } : null;
   function renderControlHints(mode) {
     if (!elControlsHint) return;
     const hints = [...(controlHints[mode] || [])];
-    if (mode === 'person' && controllerManager.spiderSuited) hints.push([['Shift', 'E'], 'Hold to swing']);
+    if (mode === 'person' && controllerManager.spiderSuited) hints.push([['R'], 'Hold to swing']);
+    const mouseHint = {click: [['Click'], 'Mouse look'], locked: [['Esc'], 'Free cursor'], soft: [['Esc'], 'Free cursor'], drag: [['Drag'], 'Look']};
+    if (mouseHint[cameraSystem.mouseLookMode]) hints.push(mouseHint[cameraSystem.mouseLookMode]);
     const items = hints.map(([keys, action]) => {
       const item = document.createElement('span');
       item.className = 'hint';
@@ -341,12 +353,14 @@ async function initApp() {
       }
       const label = document.createElement('span');
       label.className = 'hint-label';
-      label.textContent = action;
+      label.textContent = chineseHints?.[action] || action;
       item.appendChild(label);
       return item;
     });
     elControlsHint.replaceChildren(...items);
   }
+
+  window.addEventListener('mouse-look-change', () => renderControlHints(controllerManager.activeMode));
 
   // The taxi-yellow pill under the selected mode glides from button to button
   function placeModeIndicator() {
@@ -356,8 +370,9 @@ async function initApp() {
     modeSwitch.style.setProperty('--ind-w', `${active.offsetWidth}px`);
   }
 
-  function selectMode(mode) {
-    controllerManager.setMode(mode);
+  function selectMode(mode, options) {
+    controllerManager.setMode(mode, options);
+    hijack?.switched(mode);
     touchControls.setMode(controllerManager.activeMode);
     gamepadControls.reset();
     modeButtons.forEach((btn) => {
@@ -590,6 +605,9 @@ async function initApp() {
   window.addEventListener('keydown', (e) => {
     if (isTypingInField(e)) return;
     switch (e.code) {
+      case 'KeyE':
+        if(!e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && hijack?.act()) e.preventDefault();
+        break;
       case 'Digit1':
         selectMode('person');
         break;
@@ -651,6 +669,12 @@ async function initApp() {
     }
   });
 
+  hijack=createHijack({controllerManager,trafficSystem,selectMode,
+    isBlocked:()=>document.hidden||mapSystem.isFullMapOpen||Boolean(document.querySelector('dialog[open]')),
+    afterChange:()=>{cameraSystem.resetForTeleport();savePlayerState();}
+  });
+
+  hijack.restore(savedStreetCar);
   // Initialize the UI and chase camera around the restored player, or the civilian character on a first visit.
   selectMode(controllerManager.activeMode);
   selectCamera('chase', true);
@@ -742,7 +766,7 @@ async function initApp() {
   await showLoadingStage('Preparing shadows and the first frame...', 'warmup');
 
   const multiplayer = createMultiplayer({
-    scene, controllerManager, trafficSystem, highwayTraffic, airTraffic,
+    scene, controllerManager, trafficSystem, highwayTraffic, airTraffic, hijack,
     getDay: () => lightingSystem.activePresetId, changeDay: selectTime
   });
 
@@ -765,7 +789,8 @@ async function initApp() {
     // Update 3rd-person controllers, camera, signals, traffic & vehicle collisions, building LODs, and dynamic shadow focus
     const cityClock = multiplayer.before(dt,elapsed);
     gamepadControls.update(dt);
-    controllerManager.update(dt, elapsed, cameraSystem.initialized ? cameraSystem.currentPos : null);
+    hijack.update();
+    controllerManager.update(dt, elapsed, cameraSystem);
     cameraSystem.update(dt, elapsed);
     controllerManager.entities.person.avatar.root.visible = cameraSystem.activePresetId !== 'pov';
     streetDetails.signalClock.value = cityClock;

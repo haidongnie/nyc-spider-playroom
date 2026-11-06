@@ -1342,9 +1342,9 @@ function carPlateTexture() {
  * Every mask is built once and shared by the colour, roughness, metalness & emissive graphs (TSL turns nodes used
  * more than once into temporaries), so the fragment shader evaluates each SDF a single time.
  */
-function createLoftedCarMaterial(spec, fixedColorHex = null) {
-  const cacheKey = `${spec.name}_${fixedColorHex ?? 'instanced'}`;
-  if (_carMaterialCache.has(cacheKey)) {
+function createLoftedCarMaterial(spec, fixedColorHex = null, fixedStyle = 0, independent = false) {
+  const cacheKey = `${spec.name}_${fixedColorHex ?? 'instanced'}_${fixedStyle}`;
+  if (!independent && _carMaterialCache.has(cacheKey)) {
     return _carMaterialCache.get(cacheKey);
   }
 
@@ -1356,7 +1356,7 @@ function createLoftedCarMaterial(spec, fixedColorHex = null) {
   const paint = fixed ? color(fixedColorHex) : attribute('paintColor', 'vec3');
 
   // Decode per-instance style code (livery 0..7, metallic 0..1, trim 0..3, wheel 0..3) in the vertex stage
-  const wCode = fixed ? float(0.0) : state.w;
+  const wCode = fixed ? float(fixedStyle) : state.w;
   const vStyle = varying(
     vertexStage(
       vec4(
@@ -1886,7 +1886,7 @@ function createLoftedCarMaterial(spec, fixedColorHex = null) {
   mat.metalnessNode = metalFn();
   mat.emissiveNode = emissiveFn();
 
-  _carMaterialCache.set(cacheKey, mat);
+  if (!independent) _carMaterialCache.set(cacheKey, mat);
   return mat;
 }
 
