@@ -65,6 +65,7 @@ export function createMultiplayer({scene,controllerManager,trafficSystem,highway
       renderRoster(s);
     } else {
       names.clear(); peers.clear(); lastFlags='';
+      if(s.state==='error' && ['not-found','bad-code','removed'].includes(s.error)) writeURL('');
       for(const entity of Object.values(controllerManager.entities)){
         entity.mesh.visible=entity.type==='person' ? controllerManager.activeMode==='person'
           : entity.type==='skycar' ? entity.launched : true;
