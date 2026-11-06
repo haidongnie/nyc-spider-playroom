@@ -1463,6 +1463,7 @@ body.touch-enabled .pop-item { min-height: 44px; }
   }
 }
 
+#loading-network-status:not([hidden]) { display: block; margin-top: 7px; color: var(--text-2); font-size: 12px; }
 #loading-retry { margin-top: 14px; padding: 7px 16px; border-radius: 8px; background: var(--taxi); color: #17191d; font-weight: 650; cursor: pointer; }
 
 .hero-portrait .portrait-flash { display:none; position:absolute; inset:0; padding:5px; background:linear-gradient(155deg,#9b2028,#481018); }

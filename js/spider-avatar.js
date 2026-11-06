@@ -6,13 +6,9 @@ import { captureRevealRig, createSuitReveal } from './suit-reveal.js';
 import { civilianRig } from '../spider-assets/civilian.js';
 import { clone as cloneSkeleton } from '../spider-assets/SkeletonUtils.js';
 
-const response = await fetch(new URL('../spider-assets/peter.json.gz', import.meta.url));
-if (!response.ok) throw new Error('Could not load the Spider-Man character.');
-const bytes = new Uint8Array(await response.arrayBuffer());
-const text = bytes[0] === 31 && bytes[1] === 139
-  ? await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text()
-  : new TextDecoder().decode(bytes);
-const data = JSON.parse(text);
+import { loadGameAsset } from './asset-fetch.js';
+const data = await loadGameAsset(new URL('../spider-assets/peter.json.gz', import.meta.url),
+  bytes => JSON.parse(new TextDecoder().decode(bytes)));
 const template = new THREE.ObjectLoader().parse(data.model);
 const texture = await new THREE.TextureLoader().loadAsync('data:' + data.texture.mime + ';base64,' + data.texture.data);
 texture.colorSpace = THREE.SRGBColorSpace;
