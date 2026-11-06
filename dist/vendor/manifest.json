@@ -1,0 +1,15 @@
+{
+  "three": {
+    "version": "0.187.0",
+    "source": "https://registry.npmjs.org/three/-/three-0.187.0.tgz",
+    "archive_sha256": "ff540832ded0cfe919764d24a3d88f3e2a05f23303f876423e4f893841e90728",
+    "license": "three/LICENSE"
+  },
+  "fonts": {
+    "source": "https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&family=Overpass:wght@600;700&display=swap",
+    "licenses": [
+      "fonts/inter-OFL.txt",
+      "fonts/overpass-OFL.txt"
+    ]
+  }
+}

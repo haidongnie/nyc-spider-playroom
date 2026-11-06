@@ -1,0 +1,34 @@
+{
+  "repository": "https://github.com/mrdoob/slop-newyork",
+  "demo": "https://mrdoob.github.io/slop-newyork/",
+  "commit": "e17cde4ee6a8835c3f1ca02605c5e18ad37cccd7",
+  "retrieved": "2026-11-05",
+  "license": "MIT",
+  "author": "Mr.doob",
+  "runtime_changes": [
+    "index.html import map points to vendored exact Three.js 0.187.0 files",
+    "index.html font stylesheet points to vendored original Google Fonts files",
+    "Cyber Web City Spinner controls, cockpit and constant-speed layered traffic above Manhattan streets",
+    "Optional Anime presentation based on the active Japanese Seaside Street v10 art settings",
+    "Playable civilian and Spider-Man avatar, reversible feet-to-head transformation and web swinging on Manhattan buildings"
+  ],
+  "spinner": {
+    "repository": "https://github.com/greggman/cyber-web-city",
+    "source": "src/car/spinner.ts",
+    "author": "Gregg Tavares",
+    "license": "MIT",
+    "license_file": "dist/skycar-assets/LICENSE-Cyber-Web-City.md"
+  },
+  "character": {
+    "source": "Friendly Neighborhood Spider-Man",
+    "assets": "dist/spider-assets/source.json",
+    "credits": "dist/spider-assets/NOTICE.txt",
+    "civilian": "User supplied human figure 3d model.glb"
+  },
+  "art_reference": {
+    "title": "Japanese Seaside Street",
+    "release": 10,
+    "source_content_hash": "a1de6afd1e1b4f94062e8e3254c53139d1950c3b3f003b109aa2f091e46416c2",
+    "scene_profile": "standard materials, matte opaque street surfaces, gradient sky and selective silhouette geometry"
+  }
+}

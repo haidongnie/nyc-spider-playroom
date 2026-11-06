@@ -1,0 +1,5 @@
+Playroom Kit 0.0.97, unmodified full UMD browser distribution from the official npm package playroomkit.
+Package: https://registry.npmjs.org/playroomkit/-/playroomkit-0.0.97.tgz
+SDK reference: https://docs.joinplayroom.com/api-reference/js
+Service and project accounts: https://dev.joinplayroom.com
+The SDK and its bundled dependencies retain the notices in the original distribution.

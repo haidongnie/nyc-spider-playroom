@@ -1,0 +1,10 @@
+{
+  "name": "nyc-spider-playroom",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Multiplayer Manhattan with Spider-Man and Cyber Web City Spinners, powered by Playroom Kit.",
+  "scripts": {
+    "start": "node server.mjs"
+  }
+}
