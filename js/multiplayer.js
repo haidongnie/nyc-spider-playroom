@@ -24,8 +24,8 @@ function playerName(id) {
   return '玩家 '+String(hash%1000).padStart(3,'0');
 }
 
-export function createMultiplayer({scene,controllerManager,trafficSystem,highwayTraffic,airTraffic,getDay,changeDay}) {
-  const peers=createRemotePlayers({scene,controllerManager});
+export function createMultiplayer({scene,controllerManager,trafficSystem,highwayTraffic,airTraffic,hijack,getDay,changeDay}) {
+  const peers=createRemotePlayers({scene,controllerManager,streetCars:trafficSystem.cars});
   const shared=createSharedTraffic({controllerManager,trafficSystem,highwayTraffic,airTraffic});
   const names=new Map();
   const button=$('room-button'), panel=$('room-panel'), nickname=$('room-nickname'), codeInput=$('room-code-input');
@@ -51,6 +51,7 @@ export function createMultiplayer({scene,controllerManager,trafficSystem,highway
   }
   function onStatus(s) {
     const online=s.state==='online', busy=s.state==='connecting';
+    hijack.setNetwork(s);
     shared.setRole(online?(s.isHost?'host':'guest'):'local');
     button.dataset.online=String(online);
     $('room-badge').textContent=online?s.count+' / 10':busy?'连接中':'联机';
@@ -83,10 +84,11 @@ export function createMultiplayer({scene,controllerManager,trafficSystem,highway
   const session=createPlayroomSession({
     gameId:document.querySelector('meta[name="playroom-game-id"]')?.content || '',
     onPeerJoin(id){names.set(id,'');},
-    onPeerLeave(id){names.delete(id);peers.remove(id);},
+    onPeerLeave(id){hijack.remove(id);names.delete(id);peers.remove(id);},
     onStatus,
     onSharedState(id,s) {
-      if(!peers.receive(id,s)) return;
+      hijack.receive(id,s);
+      if(!peers.receive(id,{...s,street:hijack.approvedSlot(id,s.street)})) return;
       const display=typeof s.name==='string'?s.name.slice(0,18):'';
       if(names.get(id)!==display){names.set(id,display);renderRoster(session.status);}
       if(id===session.status.hostId && !session.status.isHost) {
@@ -140,9 +142,10 @@ export function createMultiplayer({scene,controllerManager,trafficSystem,highway
     const s=session.status;
     if(s.state!=='online') return;
     for(const e of Object.values(controllerManager.entities)) e.mesh.visible=e.type===controllerManager.activeMode;
-    const flags=controllerManager.activeMode+'/'+controllerManager.spiderSuited+'/'+Boolean(controllerManager.entities.person.web.anchor)+'/'+getDay();
+    const flags=controllerManager.activeMode+'/'+controllerManager.spiderSuited+'/'+Boolean(controllerManager.entities.person.web.anchor)+'/'+getDay()+'/'+hijack.revision;
     if(now-lastPose>=66 || flags!==lastFlags) {
       const pose=playerSnapshot(controllerManager,name||playerName(s.playerId),getDay());
+      Object.assign(pose,hijack.packet());
       session.sendPose(pose,flags!==lastFlags);
       lastPose=now;lastFlags=flags;
     }

@@ -96,6 +96,11 @@ export class SpiderSwing {
     this.closedSight = 0;
     this.groundY = this.person.position.y;
     this.groundSpeed = 0;
+    this.viewHeading = this.person.heading;
+    this.groundFacing = this.person.heading;
+    this.backHeld = false;
+    this.lastGroundInputWasBack = false;
+    this.groundPOV = false;
   }
   floor(x, z, limit) {
     let y = this.manager.getGroundHeight(x, z, 'person');
@@ -193,16 +198,62 @@ export class SpiderSwing {
     this.retry = 0.24;
     if (boost) this.velocity.y = Math.max(0, this.velocity.y) + 14;
   }
-  update(dt, keys) {
+  update(dt, keys, view) {
     if (!(dt > 0)) return;
     const steps = Math.ceil(dt * 90),
       sub = dt / steps;
-    for (let i = 0; i < steps; i++) this.advance(sub, keys);
+    for (let i = 0; i < steps; i++) this.advance(sub, keys, view);
     this.person.speed =
       this.state === 'ground' ? this.groundSpeed : Math.hypot(this.velocity.x, this.velocity.z);
     this.person.verticalVel = this.velocity.y;
   }
-  advance(dt, keys) {
+  walk(dt, forward, backward, steer, runSpeed, view) {
+    const p = this.person;
+    const pov = view?.activePresetId === 'pov';
+    const back = !forward && backward > 0;
+    if (pov !== this.groundPOV) {
+      this.viewHeading = this.groundFacing = p.heading;
+      this.backHeld = this.lastGroundInputWasBack = false;
+      this.groundPOV = pov;
+    }
+    // Commit a freely orbited chase view as the new forward direction when
+    // reversing. Its total camera angle stays fixed while the body turns.
+    if (view?.activePresetId === 'chase' &&
+      ((back && !this.backHeld) || (forward && this.lastGroundInputWasBack))) {
+      this.viewHeading += view.orbitYawOffset;
+      view.orbitYawOffset = 0;
+    }
+    this.viewHeading += steer * 2.6 * dt;
+    this.groundFacing += steer * 2.6 * dt;
+    if (back) {
+      if (pov && !this.backHeld) {
+        // Sample the view once: following the turning head every frame would
+        // turn a held S into a continuous spin. Mouse look remains available.
+        const aim = view.initialized
+          ? Math.atan2(view.currentLookAt.x - view.currentPos.x, view.currentLookAt.z - view.currentPos.z)
+          : p.heading + view.orbitYawOffset;
+        p.heading = aim;
+        view.orbitYawOffset = 0;
+        this.viewHeading = this.groundFacing = aim + Math.PI;
+      } else if (!pov) {
+        const dx = view?.currentPos ? view.currentPos.x - p.position.x : 0;
+        const dz = view?.currentPos ? view.currentPos.z - p.position.z : 0;
+        this.groundFacing = dx * dx + dz * dz > 0.01 ? Math.atan2(dx, dz) : this.viewHeading + Math.PI;
+      }
+      this.lastGroundInputWasBack = true;
+    } else if (forward) {
+      this.groundFacing = this.viewHeading;
+      this.lastGroundInputWasBack = false;
+    }
+    this.backHeld = back;
+    const angle = this.groundFacing - p.heading;
+    p.heading += clamp(Math.atan2(Math.sin(angle), Math.cos(angle)), -12 * dt, 12 * dt);
+    // Accelerate out of the turn rather than initially running away from the camera.
+    const target = (forward || backward * 0.65) * runSpeed * Math.max(0, Math.cos(this.groundFacing - p.heading));
+    this.groundSpeed += clamp(target - this.groundSpeed, -18 * dt, 18 * dt);
+    this.velocity.set(Math.sin(p.heading) * this.groundSpeed, 0, Math.cos(p.heading) * this.groundSpeed);
+  }
+  advance(dt, keys, view) {
     const p = this.person,
       pos = p.position,
       v = this.velocity;
@@ -217,17 +268,18 @@ export class SpiderSwing {
     const turn = Number(keys.left || 0) - Number(keys.right || 0),
       forward = Number(keys.forward || 0),
       brake = Number(keys.backward || 0);
-    p.heading += turn * (this.state === 'ground' ? 2.6 : 1.45) * dt;
-    const fx = Math.sin(p.heading),
-      fz = Math.cos(p.heading);
     this.groundY = this.floor(pos.x, pos.z, pos.y);
     if (this.state === 'ground' && pos.y > this.groundY + 0.28) this.state = 'air';
     if (this.state === 'ground') {
-      const target = (forward || -brake * 0.65) * runSpeed;
-      this.groundSpeed = Number.isFinite(this.groundSpeed) ? this.groundSpeed : 0;
-      this.groundSpeed += clamp(target - this.groundSpeed, -18 * dt, 18 * dt);
-      v.set(fx * this.groundSpeed, 0, fz * this.groundSpeed);
+      this.walk(dt, forward, brake, turn, runSpeed, view);
       pos.y = this.groundY;
+    } else {
+      p.heading += turn * 1.45 * dt;
+      this.viewHeading = this.groundFacing = p.heading;
+      this.backHeld = this.lastGroundInputWasBack = false;
+    }
+    const fx = Math.sin(p.heading), fz = Math.cos(p.heading);
+    if (this.state === 'ground') {
       if (leap || shoot) {
         this.state = 'air';
         // Unsuited players use the original Manhattan pedestrian's jump.

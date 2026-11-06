@@ -75,12 +75,12 @@ function driveSpeed(speed, throttle, dt, drive) {
 // Walking surface for the player's pedestrian (its rig samples it around its feet)
 const personGround = (controllers, x, z) => controllers.getGroundHeight(x, z, 'person');
 
-function collisionBody(mode, radius, heading, margin = 0) {
+function collisionBody(mode, radius, heading, margin = 0, street = null) {
   const spinner = mode === 'skycar';
   const car = mode === 'car' || spinner;
   const sin = Math.sin(heading), cos = Math.cos(heading);
-  const hx = (spinner ? SKYCAR.halfWidth : 0.86) + margin;
-  const hz = (spinner ? SKYCAR.halfLength : 2.18) + margin;
+  const hx = (spinner ? SKYCAR.halfWidth : street?.halfWidth ?? 0.86) + margin;
+  const hz = (spinner ? SKYCAR.halfLength : street?.halfL ?? 2.18) + margin;
   return {
     car, sin, cos, hx, hz, radius: radius + margin,
     extX: car ? Math.abs(cos) * hx + Math.abs(sin) * hz : radius + margin,
@@ -266,9 +266,9 @@ class ThirdPersonControllerManager {
       backward: ['KeyS', 'ArrowDown'],
       left: ['KeyA', 'ArrowLeft'],
       right: ['KeyD', 'ArrowRight'],
-      up: ['Space', 'KeyE'],
+      up: ['Space'],
       down: ['KeyQ', 'KeyC'],
-      web: ['ShiftLeft', 'ShiftRight']
+      web: ['KeyR']
     };
     const actionsByCode = new Map(Object.entries(bindings).flatMap(([action, codes]) => codes.map((code) => [code, action])));
     this._pressedCodes = new Set();
@@ -277,25 +277,22 @@ class ThirdPersonControllerManager {
     this._gamepadKeys = {};
 
     const refresh = (action) => {
-      const person = this.activeMode === 'person';
-      const codes = person && action === 'web' ? ['ShiftLeft','ShiftRight','KeyE']
-        : person && action === 'up' ? ['Space'] : bindings[action];
-      this._keyboardKeys[action] = codes.some((code) => this._pressedCodes.has(code));
+      this._keyboardKeys[action] = bindings[action].some((code) => this._pressedCodes.has(code));
       this._blendInput(action);
     };
-    this._refreshModeKeys = () => { refresh('web'); refresh('up'); };
 
     const onKey = (e, isDown) => {
-      const action = e.code === 'KeyE' && this.activeMode === 'person' ? 'web' : actionsByCode.get(e.code);
+      const action = actionsByCode.get(e.code);
       // A keyboard user pressing Space on the character portrait is activating
       // that button. Keep the in-world character's feet planted during the change.
       const activatesButton = e.code === 'Space' && e.target?.closest?.('button, [role="button"]');
-      if (!action || (isDown && (isTypingInField(e) || activatesButton))) return;
+      if (!action) return;
+      if (isDown && (isTypingInField(e) || e.target?.isContentEditable || activatesButton
+        || e.metaKey || e.ctrlKey || e.altKey || document.querySelector?.('dialog[open], #fullmap-modal:not(.hidden)'))) return;
       if (isDown) this._pressedCodes.add(e.code);
       else this._pressedCodes.delete(e.code);
       // Releasing one binding must not cancel another key held for the same action.
-      if (e.code === 'KeyE') this._refreshModeKeys();
-      else refresh(action);
+      refresh(action);
     };
 
     window.addEventListener('keydown', (e) => onKey(e, true));
@@ -358,7 +355,6 @@ class ThirdPersonControllerManager {
     }
     if (previous?.type === 'skycar' && mode !== 'skycar') this.parkSkycar(previous);
     this.activeMode = mode;
-    this._refreshModeKeys?.();
     const active = this.entities[mode];
     if (mode === 'skycar' && !active.launched) {
       active.launched = true;
@@ -487,7 +483,7 @@ class ThirdPersonControllerManager {
     const airborne = heli || this.activeMode === 'skycar';
     const radius = heli ? 4.5 : this.activeMode === 'person' ? 0.48 : 0.65;
     const sinH = Math.sin(heading), cosH = Math.cos(heading);
-    const shape = collisionBody(this.activeMode, radius, heading, 0.1);
+    const shape = collisionBody(this.activeMode, radius, heading, 0.1, this.getActiveEntity().streetDimensions);
     const reach = Math.max(shape.extX, shape.extZ);
     const margin = airborne ? 6000 : 0;
     const entity = this.getActiveEntity();
@@ -1034,7 +1030,7 @@ class ThirdPersonControllerManager {
       }
     }
 
-    const body = collisionBody(this.activeMode, radius, carEntity ? carEntity.heading : spinner ? entity.heading : 0);
+    const body = collisionBody(this.activeMode, radius, carEntity ? carEntity.heading : spinner ? entity.heading : 0, 0, carEntity?.streetDimensions);
     const { sin: sinH, cos: cosH, extX, extZ } = body;
     const contact = this._buildingContact ??= { nx: 0, nz: 0, depth: 0 };
 
@@ -1134,12 +1130,12 @@ class ThirdPersonControllerManager {
     if (this.activeMode !== 'person') this.poseVehicleHero(dt, this.getActiveEntity());
   }
 
-  update(dt, elapsed, focusPos = null) {
+  update(dt, elapsed, view = null) {
     const heli = this.entities.helicopter;
     heli.mainRotorPivot.rotation.y += dt * 24.0;
     heli.tailRotorPivot.rotation.x += dt * 32.0;
 
-    if (this.activeMode === 'person') this.updatePerson(dt);
+    if (this.activeMode === 'person') this.updatePerson(dt, view);
 
     if (this.activeMode === 'car') {
       this.updateCar(dt, elapsed);
@@ -1178,8 +1174,8 @@ class ThirdPersonControllerManager {
     this.poseCharacters(dt);
   }
 
-  updatePerson(dt) {
-    this.entities.person.web.update(dt, this.keys);
+  updatePerson(dt, view) {
+    this.entities.person.web.update(dt, this.keys, view);
   }
 
   updateCar(dt) {
