@@ -1462,3 +1462,24 @@ body.touch-enabled .pop-item { min-height: 44px; }
     transition-duration: 0.01ms !important;
   }
 }
+
+#loading-retry { margin-top: 14px; padding: 7px 16px; border-radius: 8px; background: var(--taxi); color: #17191d; font-weight: 650; cursor: pointer; }
+
+.hero-portrait .portrait-flash { display:none; position:absolute; inset:0; padding:5px; background:linear-gradient(155deg,#9b2028,#481018); }
+.hero-portrait[data-power="flash"][aria-pressed="true"] .portrait-flash { display:grid; place-items:center; }
+.hero-portrait[data-power="flash"][aria-pressed="true"] { border-color:#ffc641; }
+.portrait-flash svg,.power-icon svg { width:100%; height:100%; }
+#power-picker { position:fixed; inset: max(16px,env(safe-area-inset-top)) auto auto max(16px,env(safe-area-inset-left)); margin:0; width:min(304px,91vw); border:1px solid #77766b; border-radius:17px; background:#171d23f7; color:#f5f1ea; padding:15px; box-shadow:0 12px 42px #0007; font:500 14px/1.35 Inter,system-ui,sans-serif; }
+#power-picker::backdrop {background:#05070c42;}
+#power-picker header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+#power-picker strong { font-size:16px; }
+#power-picker button {cursor:pointer; color:inherit;}
+#power-picker [data-close] { background:transparent; font-size:22px; min-width:36px; }
+#power-picker .power-choices {display:grid; gap:7px;}
+#power-picker [data-power-choice] {display:flex;align-items:center;gap:12px;text-align:left; padding:8px; border-radius:10px; border:1px solid transparent; background:#ffffff0b; }
+#power-picker [aria-pressed="true"] { border-color:#efc45d; }
+#power-picker .power-icon { width:37px;height:37px;display:grid;place-items:center;border-radius:50%;overflow:hidden; }
+#power-picker .power-icon img { width:100%; height:100%; object-fit:cover; }
+#power-picker .flash {background:#87252b; padding:3px;}
+#power-picker small {display:block; margin-top:2px; color:#c1c6ce; font-size:11px;}
+#power-picker [data-transform] { margin-top:12px;background:#f3c44b;color:#281f0d;border-radius:9px;padding:8px 11px;width:100%;font-weight:650;}

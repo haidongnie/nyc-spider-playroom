@@ -106,7 +106,7 @@ class TouchControls {
     for (const button of this.buttons) {
       const action = button.getAttribute('data-touch-action');
       button.hidden = (action === 'up' && mode !== 'person' && !flying) || (action === 'down' && !flying) ||
-        (action === 'web' && (mode !== 'person' || !this.controller.spiderSuited));
+        (action === 'web' && (mode !== 'person' || !this.controller.spiderSuited || this.controller.selectedPower !== 'spider'));
       button.setAttribute('aria-label', action === 'web' ? 'Hold to swing' : labels[action]);
       const label = this.root.querySelector(`[data-touch-label="${action}"]`);
       if (label) label.textContent = labels[action];

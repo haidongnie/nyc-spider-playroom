@@ -7,74 +7,36 @@
   <title>NYC Together · Spider-Man</title>
   <link rel="icon" href="data:," />
   <meta name="description" content="Photorealistic GTA-style 3D Slop New York simulation built with Three.js WebGPURenderer and TSL shaders featuring complete Manhattan street map (125th St to Battery Park), third-person navigation (Person, Car, Cyclist, Helicopter, Cyber Web City Spinner), and 11 cinematic cameras at 60 FPS." />
-  <!-- three.js r187 release (npm package, served by jsDelivr) -->
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "./vendor/three/build/three.webgpu.js",
-        "three/webgpu": "./vendor/three/build/three.webgpu.js",
-        "three/tsl": "./vendor/three/build/three.tsl.js",
-        "three/addons/": "./vendor/three/examples/jsm/"
-      }
+  <!-- GAME BOOT START -->
+  <script type="importmap">{"imports":{"three/addons/":"./vendor/three/examples/jsm/","./js/air-lanes.js":"./js/built/api-5675VRE4/air-lanes.js","./js/air-traffic-lights.js":"./js/built/api-5675VRE4/air-traffic-lights.js","./js/anime-style.js":"./js/built/api-5675VRE4/anime-style.js","./js/audio-acoustics.js":"./js/built/api-5675VRE4/audio-acoustics.js","./js/audio-events.js":"./js/built/api-5675VRE4/audio-events.js","./js/audio-sources.js":"./js/built/api-5675VRE4/audio-sources.js","./js/audio-synthesis.js":"./js/built/api-5675VRE4/audio-synthesis.js","./js/audio-system.js":"./js/built/api-5675VRE4/audio-system.js","./js/boroughs.js":"./js/built/api-5675VRE4/boroughs.js","./js/building-codec.js":"./js/built/api-5675VRE4/building-codec.js","./js/building-collision.js":"./js/built/api-5675VRE4/building-collision.js","./js/building-details.js":"./js/built/api-5675VRE4/building-details.js","./js/building-footprints.js":"./js/built/api-5675VRE4/building-footprints.js","./js/building-geodata.js":"./js/built/api-5675VRE4/building-geodata.js","./js/building-style.js":"./js/built/api-5675VRE4/building-style.js","./js/buildings.js":"./js/built/api-5675VRE4/buildings.js","./js/bus.js":"./js/built/api-5675VRE4/bus.js","./js/cameras.js":"./js/built/api-5675VRE4/cameras.js","./js/cars.js":"./js/built/api-5675VRE4/cars.js","./js/city-config.js":"./js/built/api-5675VRE4/city-config.js","./js/city-grid.js":"./js/built/api-5675VRE4/city-grid.js","./js/controllers.js":"./js/built/api-5675VRE4/controllers.js","./js/district-layout.js":"./js/built/api-5675VRE4/district-layout.js","./js/fire-escapes.js":"./js/built/api-5675VRE4/fire-escapes.js","./js/flash-effects.js":"./js/built/api-5675VRE4/flash-effects.js","./js/gamepad-controls.js":"./js/built/api-5675VRE4/gamepad-controls.js","./js/helicopter.js":"./js/built/api-5675VRE4/helicopter.js","./js/hijack.js":"./js/built/api-5675VRE4/hijack.js","./js/landmarks.js":"./js/built/api-5675VRE4/landmarks.js","./js/lighting.js":"./js/built/api-5675VRE4/lighting.js","./js/multiplayer.js":"./js/built/api-5675VRE4/multiplayer.js","./js/nyc-geodata.js":"./js/built/api-5675VRE4/nyc-geodata.js","./js/nyc-map.js":"./js/built/api-5675VRE4/nyc-map.js","./js/pedestrian-routes.js":"./js/built/api-5675VRE4/pedestrian-routes.js","./js/pedestrian-system.js":"./js/built/api-5675VRE4/pedestrian-system.js","./js/pedestrians.js":"./js/built/api-5675VRE4/pedestrians.js","./js/playroom-session.js":"./js/built/api-5675VRE4/playroom-session.js","./js/post-processing.js":"./js/built/api-5675VRE4/post-processing.js","./js/power-picker.js":"./js/built/api-5675VRE4/power-picker.js","./js/remote-players.js":"./js/built/api-5675VRE4/remote-players.js","./js/road-network.js":"./js/built/api-5675VRE4/road-network.js","./js/road-paint.js":"./js/built/api-5675VRE4/road-paint.js","./js/room-rendezvous.js":"./js/built/api-5675VRE4/room-rendezvous.js","./js/scene-culling.js":"./js/built/api-5675VRE4/scene-culling.js","./js/seaside-outlines.js":"./js/built/api-5675VRE4/seaside-outlines.js","./js/seaside-sky.js":"./js/built/api-5675VRE4/seaside-sky.js","./js/shared-traffic.js":"./js/built/api-5675VRE4/shared-traffic.js","./js/skycar.js":"./js/built/api-5675VRE4/skycar.js","./js/spider-avatar.js":"./js/built/api-5675VRE4/spider-avatar.js","./js/spider-swing.js":"./js/built/api-5675VRE4/spider-swing.js","./js/street-details.js":"./js/built/api-5675VRE4/street-details.js","./js/street-props.js":"./js/built/api-5675VRE4/street-props.js","./js/subway-entrances.js":"./js/built/api-5675VRE4/subway-entrances.js","./js/subway-geodata.js":"./js/built/api-5675VRE4/subway-geodata.js","./js/suit-reveal.js":"./js/built/api-5675VRE4/suit-reveal.js","./js/touch-controls.js":"./js/built/api-5675VRE4/touch-controls.js","./js/traffic.js":"./js/built/api-5675VRE4/traffic.js","./js/tree-geodata.js":"./js/built/api-5675VRE4/tree-geodata.js","./js/tree-placements.js":"./js/built/api-5675VRE4/tree-placements.js","./js/trees.js":"./js/built/api-5675VRE4/trees.js","./js/tsl-materials.js":"./js/built/api-5675VRE4/tsl-materials.js","./js/vehicle-lights.js":"./js/built/api-5675VRE4/vehicle-lights.js","./js/vehicle-physics.js":"./js/built/api-5675VRE4/vehicle-physics.js","./js/vehicle-radio.js":"./js/built/api-5675VRE4/vehicle-radio.js","./js/vehicles.js":"./js/built/api-5675VRE4/vehicles.js","./vendor/three/build/three.tsl.js":"./js/built/api-5675VRE4/three.tsl.js","three/tsl":"./js/built/api-5675VRE4/three.tsl.js","./vendor/three/build/three.webgpu.js":"./js/built/api-5675VRE4/three.webgpu.js","three/webgpu":"./js/built/api-5675VRE4/three.webgpu.js","three":"./js/built/api-5675VRE4/three.webgpu.js"}}</script>
+  <link rel="modulepreload" href="./js/built/game-XBMXVF74.js" />
+  <link rel="modulepreload" href="./js/built/shared-BDWBFIBW.js" />
+  <link rel="preload" as="fetch" crossorigin href="./js/districts/overview.bin.gz" />
+  <link rel="preload" as="fetch" crossorigin href="./js/tree-geodata.bin.gz" />
+  <link rel="preload" as="fetch" crossorigin href="./spider-assets/civilian-start.glb.gz" />
+  <link rel="preload" as="fetch" crossorigin href="./spider-assets/peter.json.gz" />
+  <link rel="preload" as="fetch" crossorigin href="./skycar-assets/spinner-player.bin.gz" />
+  <link rel="preload" as="fetch" crossorigin href="./skycar-assets/spinner-traffic.bin.gz" />
+  <script>(function primeDistricts(keys, defaultZ, size, radius) {
+  let x=-11.6,z=defaultZ;
+  try {
+    const saved=JSON.parse(localStorage.getItem('nyc-player-state'));
+    const actor=saved?.entities?.[saved.activeMode];
+    if((saved?.version===1 || saved?.version===2) && actor && [actor.x,actor.z].every(Number.isFinite)) {
+      x=actor.x;z=actor.z;
     }
-  </script>
-  <!-- Fetch the city modules in parallel before stylesheets; the module graph controls evaluation order. -->
-  <link rel="modulepreload" href="./js/nyc-geodata.js" />
-  <link rel="modulepreload" href="./js/city-config.js" />
-  <link rel="modulepreload" href="./js/tsl-materials.js" />
-  <link rel="modulepreload" href="./js/trees.js" />
-  <link rel="modulepreload" href="./js/tree-placements.js" />
-  <link rel="modulepreload" href="./js/tree-geodata.js" />
-  <link rel="preload" href="./js/tree-geodata.bin.gz" as="fetch" crossorigin />
-  <link rel="modulepreload" href="./js/vehicles.js" />
-  <link rel="modulepreload" href="./js/cars.js" />
-  <link rel="modulepreload" href="./js/bus.js" />
-  <link rel="modulepreload" href="./js/helicopter.js" />
-  <link rel="modulepreload" href="./js/skycar.js" />
-  <link rel="modulepreload" href="./js/air-lanes.js" />
-  <link rel="modulepreload" href="./js/air-traffic-lights.js" />
-  <link rel="modulepreload" href="./js/vehicle-lights.js" />
-  <link rel="modulepreload" href="./js/vehicle-physics.js" />
-  <link rel="modulepreload" href="./js/pedestrians.js" />
-  <link rel="modulepreload" href="./js/lighting.js" />
-  <link rel="modulepreload" href="./js/seaside-sky.js" />
-  <link rel="modulepreload" href="./js/anime-style.js" />
-  <link rel="modulepreload" href="./js/seaside-outlines.js" />
-  <link rel="modulepreload" href="./js/city-grid.js" />
-  <link rel="modulepreload" href="./js/boroughs.js" />
-  <link rel="modulepreload" href="./js/buildings.js" />
-  <link rel="modulepreload" href="./js/building-details.js" />
-  <link rel="modulepreload" href="./js/building-geodata.js" />
-  <link rel="preload" href="./js/building-geodata.bin.gz" as="fetch" crossorigin />
-  <link rel="modulepreload" href="./js/building-footprints.js" />
-  <link rel="modulepreload" href="./js/building-collision.js" />
-  <link rel="modulepreload" href="./js/fire-escapes.js" />
-  <link rel="modulepreload" href="./js/landmarks.js" />
-  <link rel="modulepreload" href="./js/street-details.js" />
-  <link rel="modulepreload" href="./js/street-props.js" />
-  <link rel="modulepreload" href="./js/subway-geodata.js" />
-  <link rel="modulepreload" href="./js/subway-entrances.js" />
-  <link rel="modulepreload" href="./js/road-network.js" />
-  <link rel="modulepreload" href="./js/road-paint.js" />
-  <link rel="modulepreload" href="./js/traffic.js" />
-  <link rel="modulepreload" href="./js/pedestrian-system.js" />
-  <link rel="modulepreload" href="./js/pedestrian-routes.js" />
-  <link rel="modulepreload" href="./js/controllers.js" />
-  <link rel="modulepreload" href="./js/spider-avatar.js" />
-  <link rel="modulepreload" href="./js/spider-swing.js" />
-  <link rel="modulepreload" href="./js/touch-controls.js" />
-  <link rel="modulepreload" href="./js/gamepad-controls.js" />
-  <link rel="modulepreload" href="./js/cameras.js" />
-  <link rel="modulepreload" href="./js/nyc-map.js" />
-  <link rel="modulepreload" href="./js/scene-culling.js" />
-  <link rel="modulepreload" href="./js/post-processing.js" />
-  <link rel="modulepreload" href="./js/audio-synthesis.js" />
-  <link rel="modulepreload" href="./js/audio-events.js" />
-  <link rel="modulepreload" href="./js/audio-sources.js" />
-  <link rel="modulepreload" href="./js/audio-acoustics.js" />
-  <link rel="modulepreload" href="./js/audio-system.js" />
-  <link rel="modulepreload" href="./js/main.js" />
-  <script type="module" src="./js/main.js"></script>
+  } catch {}
+  for(const key of keys) {
+    const [ix,iz]=key.split('_').map(Number);
+    if(Math.hypot(Math.max(0,Math.abs(x-ix*size)-size/2),Math.max(0,Math.abs(z-iz*size)-size/2))>radius)continue;
+    const link=document.createElement('link');
+    link.rel='preload';link.as='fetch';link.crossOrigin='anonymous';
+    link.href='./js/districts/'+key+'.bin.gz';
+    document.head.append(link);
+  }
+})(["-1_-1","-1_-2","-1_-3","-1_-4","-1_-5","-1_-6","-1_-7","-1_0","-1_1","-1_2","-1_3","-1_4","-1_5","-2_-1","-2_-2","-2_-3","-2_-4","-2_-5","-2_-6","-2_-7","-2_0","-2_1","-2_2","0_-1","0_-2","0_-3","0_-4","0_-5","0_-6","0_-7","0_0","0_1","0_2","0_3","0_4","0_5","0_6","1_-1","1_-2","1_-3","1_-4","1_-5","1_-6","1_-7","1_0","1_1","1_2","1_3","1_4","1_5","1_6","2_-3","2_-4","2_2","2_3","2_4","2_5","3_4"],410.6,1000,360)</script>
+  <script id="city-entry" type="module" src="./js/built/game-XBMXVF74.js"></script>
+  <!-- GAME BOOT END -->
   <!-- Inter (UI) & Overpass (street-name signs: modelled on Highway Gothic, the US road sign typeface) -->
   <link rel="stylesheet" href="./vendor/fonts/fonts.css" />
   <link rel="stylesheet" href="./css/style.css?v=spider-portrait" />
@@ -120,6 +82,42 @@
       <div class="loader-title">Slop New York</div>
       <div class="loader-track" aria-hidden="true"><span id="loading-progress" class="loader-fill"></span></div>
       <div id="loading-status">Loading city code and data...</div>
+      <button id="loading-retry" type="button" hidden>Retry</button>
+      <script>
+        (() => {
+          const status = document.getElementById('loading-status');
+          const fill = document.getElementById('loading-progress');
+          const retry = document.getElementById('loading-retry');
+          const zh = /^zh/i.test(navigator.language);
+          retry.textContent = zh ? '重新加载' : 'Retry';
+          retry.onclick = () => location.reload();
+          const planned = [...document.querySelectorAll('link[rel=modulepreload],link[rel=preload][as=fetch]')];
+          const urls = new Set(planned.map(link => link.href));
+          let previous = status.textContent, timer;
+          function downloaded() {
+            if (status.textContent !== previous || !retry.hidden) { clearInterval(timer); return; }
+            const done = new Set(performance.getEntriesByType('resource').filter(r => urls.has(r.name) && r.responseEnd > 0).map(r => r.name)).size;
+            previous = done === urls.size
+              ? (zh ? '正在准备角色和街区…' : 'Preparing characters and streets…')
+              : (zh ? '正在下载游戏资源' : 'Downloading game resources') + ' · ' + done + ' / ' + urls.size;
+            status.textContent = previous;
+            fill.style.animation = 'none';
+            fill.style.transform = 'scaleX(' + (0.10 * done / Math.max(1, urls.size)) + ')';
+          }
+          function failed() {
+            if (document.getElementById('loading-overlay').classList.contains('hidden')) return;
+            clearInterval(timer);
+            status.textContent = zh ? '游戏资源或画面初始化失败，可以重新加载。' : 'Game resources or graphics could not start.';
+            retry.hidden = false;
+          }
+          window.addEventListener('error', e => { if (e.target?.id === 'city-entry' || e.error) failed(); }, true);
+          window.addEventListener('unhandledrejection', failed);
+          window.addEventListener('nyc-load-error', failed);
+          window.addEventListener('nyc-playable', () => clearInterval(timer), {once:true});
+          timer = setInterval(downloaded, 300);
+          downloaded();
+        })();
+      </script>
     </div>
   </div>
 

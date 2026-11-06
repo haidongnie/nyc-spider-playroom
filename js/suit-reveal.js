@@ -150,5 +150,5 @@ export function createSuitReveal(root, civilian, spider) {
     const shown = 1 - THREE.MathUtils.smoothstep(h, boundary.value - 0.04, boundary.value + 0.04);
     return target.copy(civHand).lerp(suitHand, shown);
   }
-  return {restore, update, hand};
+  return {restore, update, hand, addSuitPart(part) { attachMask({root:part}, true); }};
 }

@@ -1,3 +1,4 @@
+import { createFlashTrail } from './flash-effects.js';
 import { applyStreetCarSkin } from './hijack.js';
 // Remote peers are render-only. Their snapshots never feed the local controller,
 // collision system, audio, save data, or persistent parked player vehicles.
@@ -30,7 +31,7 @@ function normalize(raw, time) {
     roll:clamp(numeric(raw.roll),-1.3,1.3),speed,
     pose:POSES.has(raw.pose)?raw.pose:Math.abs(speed)>3?'run':Math.abs(speed)>0.25?'walk':'idle',
     phase:Number.isFinite(raw.phase)?wrap(raw.phase):null, side:raw.side==='left'?'left':'right',
-    suited:raw.suited===true, suitProgress:Number.isFinite(raw.suitProgress)?clamp(raw.suitProgress,0,1):null,
+    power:raw.power==='flash'?'flash':'spider', suited:raw.suited===true, suitProgress:Number.isFinite(raw.suitProgress)?clamp(raw.suitProgress,0,1):null,
     web:point(raw.web ?? raw.anchor), name:typeof raw.name==='string'?Array.from(raw.name.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g,'').trim()).slice(0,18).join(''):''};
 }
 function displayState(queue, time, output) {
@@ -39,7 +40,7 @@ function displayState(queue, time, output) {
   const span=b.time-a.time;
   const t=span>0?clamp((time-a.time)/span,0,1):0;
   const sample=t>=1?b:a;
-  output.mode=sample.mode;output.street=sample.street;output.pose=sample.pose;output.suited=sample.suited;output.suitProgress=sample.suitProgress;
+  output.mode=sample.mode;output.street=sample.street;output.pose=sample.pose;output.power=sample.power;output.suited=sample.suited;output.suitProgress=sample.suitProgress;
   output.side=sample.side;output.web=sample.web;output.name=sample.name;
   output.x=THREE.MathUtils.lerp(a.p[0],b.p[0],t);output.y=THREE.MathUtils.lerp(a.p[1],b.p[1],t);output.z=THREE.MathUtils.lerp(a.p[2],b.p[2],t);
   output.heading=a.heading+wrap(b.heading-a.heading)*t;
@@ -204,6 +205,7 @@ export function createRemotePlayers({scene,controllerManager,showNames=true,stre
     root.rotation.set(0,0,0);peer.animTime=.2;
   }
   function syncSuit(peer,state,initial){
+    if(peer.avatar.power!==state.power)peer.avatar.setPower(state.power);
     if(!initial && peer.suit===state.suited)return;
     const a=peer.avatar;
     if(initial){
@@ -233,7 +235,7 @@ export function createRemotePlayers({scene,controllerManager,showNames=true,stre
       // The remote group remains in world space even while its meshes are culled.
       const visible=onscreen && dist<(s.mode==='person'?680:1500);
       peer.root.visible=visible;peer.wire.visible=false;
-      if(!visible){peer.hadAvatarVisible=false;continue;}
+      if(!visible){peer.trail?.update(dt,peer.root.position,s.heading,false);peer.hadAvatarVisible=false;continue;}
       syncMode(peer,s);
       const turn=peer.yaw===null||!dt?0:wrap(s.heading-peer.yaw)/dt;peer.yaw=s.heading;
       const v=peer.vehicles.get(peer.mode);
@@ -253,6 +255,9 @@ export function createRemotePlayers({scene,controllerManager,showNames=true,stre
           peer.animTime=0;
         }
       }else if(peer.avatar)peer.avatar.root.visible=false;
+      const running = detailed && s.mode==='person' && s.power==='flash' && s.suited && Math.abs(s.speed)>3;
+      if (running && !peer.trail) peer.trail = createFlashTrail(scene);
+      peer.trail?.update(dt, peer.root.position, s.heading, running, peer.avatar?.root);
       peer.hadAvatarVisible=detailed;
       if(labels && dist<310)tag(peer,s);
       if(peer.tag){
@@ -277,6 +282,7 @@ export function createRemotePlayers({scene,controllerManager,showNames=true,stre
   function remove(id){
     const p=peers.get(id);if(!p)return;
     if(p.tag){p.tag.material.map.dispose();p.tag.material.dispose();}
+    p.trail?.dispose();
     if(p.avatar)releaseAvatar(p.avatar);
     const vehicle=p.vehicles.get('car');if(vehicle)applyStreetCarSkin(vehicle,null,-1);
     p.root.removeFromParent();p.wire.removeFromParent();peers.delete(id);

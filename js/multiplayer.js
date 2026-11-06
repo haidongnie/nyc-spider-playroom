@@ -13,12 +13,12 @@ function playerSnapshot(controllers, name, day, camera) {
   const pose=!onFoot ? 'idle' : web.anchor ? (web.swingTime<.14?'webshoot':'swing') :
     airborne ? (e.verticalVel>0?'jump':'fall') : Math.abs(e.speed)>4?'run':Math.abs(e.speed)>.25?'walk':'idle';
   const pivot=e.leanPivot || e.chassisPivot || e.tiltPivot;
-  camera.updateWorldMatrix(true, false);
-  const matrix = camera.matrixWorld.elements;
-  const viewYaw = Math.atan2(-matrix[8], -matrix[10]);
+  camera?.updateWorldMatrix(true, false);
+  const matrix = camera?.matrixWorld.elements;
+  const viewYaw = matrix ? Math.atan2(-matrix[8], -matrix[10]) : e.heading;
   return {name,viewYaw:round(viewYaw),mode:e.type,x:round(e.position.x),y:round(e.position.y),z:round(e.position.z),heading:round(e.heading),
     pitch:round(pivot?.rotation.x),roll:round(pivot?.rotation.z),speed:round(e.speed),phase:round(e.pedalPhase),
-    pose,side:web.side,suited:controllers.spiderSuited,suitProgress:round(person.avatar.suitProgress),
+    pose,side:web.side,power:controllers.selectedPower,suited:controllers.spiderSuited,suitProgress:round(person.avatar.suitProgress),
     web:onFoot&&web.anchor ? [round(web.anchor.x),round(web.anchor.y),round(web.anchor.z)] : null,day};
 }
 
@@ -93,24 +93,43 @@ export function createMultiplayer({scene,controllerManager,trafficSystem,highway
       statusLine.textContent=busy?'正在连接 Playroom…':s.state==='error'?(messages[s.error]||s.message):'每个房间最多 10 人。';
     }
   }
-  function visitPlayer(id) {
-    const target=positions.get(id);
-    if(!target)return false;
-    const others=[...positions.entries()].filter(([peerId])=>peerId!==id).map(([,pose])=>pose);
-    if(!rendezvous.meet(target,others,session.status.playerId)){
-      statusLine.textContent='队友周围暂无安全的会合点，请稍后再试。';
-      return false;
+  let visitToken = 0, visiting = null;
+  async function visitPlayer(id) {
+    if (visiting === id || !positions.has(id)) return false;
+    const token = ++visitToken, room = session.status.code;
+    visiting = id;
+    if (panel.open) statusLine.textContent = '正在加载队友附近的街区…';
+    const current = () => token === visitToken && session.status.state === 'online' && room === session.status.code && positions.has(id);
+    try {
+      for (let attempt = 0; attempt < 3 && current(); attempt++) {
+        const target = positions.get(id);
+        await controllerManager.ensureDistrictAt?.(target.x, target.z);
+        if (!current()) return false;
+        const latest = positions.get(id);
+        if (Math.hypot(latest.x-target.x, latest.z-target.z) > 180) continue;
+        const others = [...positions.entries()].filter(([other]) => other !== id).map(([,pose]) => pose);
+        if (!rendezvous.meet(latest, others, session.status.playerId)) {
+          statusLine.textContent = '队友周围暂无安全的会合点，请稍后再试。';
+          return false;
+        }
+        meetHost = false;
+        statusLine.textContent = '已到达 '+(names.get(id)||playerName(id))+' 附近。';
+        if (panel.open) panel.close();
+        return true;
+      }
+    } catch {
+      if (current()) statusLine.textContent = '街区加载失败，请重试。';
+    } finally {
+      if (token === visitToken) visiting = null;
     }
-    statusLine.textContent='已到达 '+(names.get(id)||playerName(id))+' 附近。';
-    if(panel.open)panel.close();
-    return true;
+    return false;
   }
   function tryMeetingHost() {
-    if(!meetHost || performance.now()<retryMeetAt)return;
-    const host=session.status.hostId;
-    if(!host || session.status.isHost || !positions.has(host))return;
-    retryMeetAt=performance.now()+1500;
-    if(visitPlayer(host))meetHost=false;
+    if (!meetHost || visiting || performance.now() < retryMeetAt) return;
+    const host = session.status.hostId;
+    if (!host || session.status.isHost || !positions.has(host)) return;
+    retryMeetAt = performance.now() + 1500;
+    void visitPlayer(host);
   }
   const session=createPlayroomSession({
     gameId:document.querySelector('meta[name="playroom-game-id"]')?.content || '',
@@ -150,6 +169,9 @@ export function createMultiplayer({scene,controllerManager,trafficSystem,highway
     meetHost=Boolean(code); retryMeetAt=0; dismissCreateOnGuest=!code&&panel.open; lastWorld=lastPose=0; lastFlags='';
     try {
       if(code) await session.join(code); else await session.create();
+      const initial = playerSnapshot(controllerManager, name || playerName(session.status.playerId), getDay());
+      Object.assign(initial,hijack.packet());
+      session.sendPose(initial, true);
     } catch(err) {if(session.status.state!=='error')statusLine.textContent=err.message;openPanel();}
   }
   $('room-create').addEventListener('click',()=>connect(null));
@@ -179,7 +201,7 @@ export function createMultiplayer({scene,controllerManager,trafficSystem,highway
     const s=session.status;
     if(s.state!=='online') return;
     for(const e of Object.values(controllerManager.entities)) e.mesh.visible=e.type===controllerManager.activeMode;
-    const flags=controllerManager.activeMode+'/'+controllerManager.spiderSuited+'/'+Boolean(controllerManager.entities.person.web.anchor)+'/'+getDay()+'/'+hijack.revision;
+    const flags=controllerManager.activeMode+'/'+controllerManager.selectedPower+'/'+controllerManager.spiderSuited+'/'+Boolean(controllerManager.entities.person.web.anchor)+'/'+getDay()+'/'+hijack.revision;
     if(now-lastPose>=66 || flags!==lastFlags) {
       const pose=playerSnapshot(controllerManager,name||playerName(s.playerId),getDay(),camera);
       Object.assign(pose,hijack.packet());
